@@ -8,7 +8,7 @@ import gspread
 st.set_page_config(page_title="최현규의 열공 대시보드", layout="wide")
 st.title("🚀 최현규의 데이터 기반 학습 시스템")
 
-# 2. 구글 시트 직접 연결 (Streamlit 래퍼 버그 완벽 회피)
+# 2. 구글 시트 직접 연결
 @st.cache_resource
 def init_connection():
     sa_data = st.secrets["connections"]["gsheets"]["service_account"]
@@ -33,17 +33,27 @@ def get_data():
         if '시간' in df.columns:
             df['시간'] = pd.to_numeric(df['시간'])
         return df
+    except gspread.exceptions.APIError:
+        st.error("구글 시트 읽기 권한이 없습니다. 시트 공유 설정에서 서비스 계정을 추가해주세요.")
+        st.stop()
     except Exception:
         return pd.DataFrame(columns=['날짜', '과목', '시간'])
 
-# 데이터 업데이트 함수
+# 데이터 업데이트 함수 (권한 에러 예외 처리 추가)
 def update_data(updated_df):
-    ws.clear()
-    save_df = updated_df.copy()
-    save_df['날짜'] = save_df['날짜'].astype(str)
-    # 데이터 리스트 변환 후 저장
-    data = [save_df.columns.values.tolist()] + save_df.values.tolist()
-    ws.update(data)
+    try:
+        ws.clear()
+        save_df = updated_df.copy()
+        save_df['날짜'] = save_df['날짜'].astype(str)
+        # 데이터 리스트 변환 후 저장
+        data = [save_df.columns.values.tolist()] + save_df.values.tolist()
+        ws.update(values=data)
+    except gspread.exceptions.APIError as e:
+        st.error(f"구글 시트 쓰기(편집) 권한이 없습니다. 서비스 계정 이메일이 시트의 '편집자'로 등록되어 있는지 확인하세요. 상세 오류: {e}")
+        st.stop()
+    except Exception as e:
+        st.error(f"데이터 업데이트 중 알 수 없는 오류가 발생했습니다: {e}")
+        st.stop()
 
 df = get_data()
 
