@@ -1,27 +1,49 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import plotly.express as px
 import json
+import gspread
 
 # 1. 페이지 설정
 st.set_page_config(page_title="최현규의 열공 대시보드", layout="wide")
 st.title("🚀 최현규의 데이터 기반 학습 시스템")
 
-# 2. 구글 시트 연결 (오류 원인 완벽 해결: 올바른 파라미터명 사용)
-sa_data = st.secrets["connections"]["gsheets"]["service_account"]
-# JSON 문자열인 경우 딕셔너리로 확실하게 변환
-if isinstance(sa_data, str):
-    sa_dict = json.loads(sa_data)
-else:
-    sa_dict = sa_data
+# 2. 구글 시트 직접 연결 (Streamlit 래퍼 버그 완벽 회피)
+@st.cache_resource
+def init_connection():
+    sa_data = st.secrets["connections"]["gsheets"]["service_account"]
+    sa_dict = json.loads(sa_data) if isinstance(sa_data, str) else sa_data
+    return gspread.service_account_from_dict(sa_dict)
 
-# service_account_info가 아닌 service_account 파라미터를 사용하여 강제 쓰기 권한 취득
-conn = st.connection("gsheets", type=GSheetsConnection, service_account=sa_dict)
+try:
+    gc = init_connection()
+    sh = gc.open_by_url(st.secrets["public_gsheets_url"])
+    ws = sh.sheet1
+except Exception as e:
+    st.error(f"구글 시트 연결에 실패했습니다. Secrets 설정을 확인해주세요. 상세오류: {e}")
+    st.stop()
 
-# 데이터 불러오기 함수 (실시간 반영을 위해 TTL=0)
+# 데이터 불러오기 함수
 def get_data():
-    return conn.read(spreadsheet=st.secrets["public_gsheets_url"], ttl="0s")
+    try:
+        records = ws.get_all_records()
+        if not records:
+            return pd.DataFrame(columns=['날짜', '과목', '시간'])
+        df = pd.DataFrame(records)
+        if '시간' in df.columns:
+            df['시간'] = pd.to_numeric(df['시간'])
+        return df
+    except Exception:
+        return pd.DataFrame(columns=['날짜', '과목', '시간'])
+
+# 데이터 업데이트 함수
+def update_data(updated_df):
+    ws.clear()
+    save_df = updated_df.copy()
+    save_df['날짜'] = save_df['날짜'].astype(str)
+    # 데이터 리스트 변환 후 저장
+    data = [save_df.columns.values.tolist()] + save_df.values.tolist()
+    ws.update(data)
 
 df = get_data()
 
@@ -35,7 +57,6 @@ with st.sidebar:
     with st.form("input_form", clear_on_submit=True):
         date = st.date_input("날짜")
         subject = st.selectbox("과목", ["국어", "수학", "영어", "사회문화", "지구과학I", "한국사"])
-        # 시작점을 0.0으로 수정
         time = st.number_input("시간 (h)", min_value=0.0, step=0.5, value=0.0)
         submit = st.form_submit_button("구글 시트에 저장")
         
@@ -43,7 +64,7 @@ with st.sidebar:
             if time > 0:
                 new_row = pd.DataFrame([{"날짜": str(date), "과목": subject, "시간": time}])
                 updated_df = pd.concat([df, new_row], ignore_index=True)
-                conn.update(spreadsheet=st.secrets["public_gsheets_url"], data=updated_df)
+                update_data(updated_df)
                 st.success("기록 완료!")
                 st.rerun()
             else:
@@ -52,11 +73,10 @@ with st.sidebar:
     st.divider()
     st.header("🗑️ 최근 기록 삭제")
     if not df.empty:
-        # 가장 최근 데이터 순으로 보여주며 삭제 선택
         delete_idx = st.selectbox("빠른 삭제할 기록을 선택하세요", df.index, format_func=lambda x: f"[{x}] {df.iloc[x]['날짜']} - {df.iloc[x]['과목']} ({df.iloc[x]['시간']}h)")
-        if st.button("선택한 기록 삭제", font_variant="primary"):
-            updated_df = df.drop(delete_idx)
-            conn.update(spreadsheet=st.secrets["public_gsheets_url"], data=updated_df)
+        if st.button("선택한 기록 삭제", type="primary"):
+            updated_df = df.drop(delete_idx).reset_index(drop=True)
+            update_data(updated_df)
             st.warning("기록이 삭제되었습니다.")
             st.rerun()
 
@@ -64,7 +84,7 @@ with st.sidebar:
 if df.empty:
     st.info("데이터가 없습니다. 왼쪽 사이드바에서 첫 공부 기록을 시작해보세요!")
 else:
-    # 날짜 데이터 전처리 (모든 탭에서 공통으로 사용하기 위해 상단 배치)
+    # 날짜 데이터 전처리
     df['날짜'] = pd.to_datetime(df['날짜'])
     days_map = {0:'월', 1:'화', 2:'수', 3:'목', 4:'금', 5:'토', 6:'일'}
     df['요일'] = df['날짜'].dt.dayofweek.map(days_map)
@@ -75,14 +95,12 @@ else:
     tab1, tab2, tab3 = st.tabs(["📊 요약 및 추이", "📅 요일별 집중 분석", "🗓️ 날짜별 상세 관리"])
 
     with tab1:
-        # 지표 표시
         c1, c2, c3 = st.columns(3)
         c1.metric("총 시간", f"{df['시간'].sum():.1f}h")
         c2.metric("기록 일수", f"{df['날짜'].nunique()}일")
         c3.metric("일평균", f"{(df['시간'].sum()/df['날짜'].nunique()):.1f}h")
 
-        # 추이 그래프
-        line_df = df.groupby('날짜')['시간'].sum().reset_index()
+        line_df = df.groupby('날짜', as_index=False)['시간'].sum()
         fig_line = px.line(line_df, x='날짜', y='시간', title="학습 시간 변화 추이", markers=True)
         st.plotly_chart(fig_line, use_container_width=True)
 
@@ -91,13 +109,11 @@ else:
         col_left, col_right = st.columns(2)
         
         with col_left:
-            # 요일별 평균 시간
             week_avg = df.groupby('요일', observed=True)['시간'].mean().reset_index()
             fig_week = px.bar(week_avg, x='요일', y='시간', color='요일', title="요일별 평균 공부 시간")
             st.plotly_chart(fig_week, use_container_width=True)
             
         with col_right:
-            # 선택한 요일의 과목 비중
             sel_day = st.radio("분석할 요일", day_order, horizontal=True)
             day_df = df[df['요일'] == sel_day]
             if not day_df.empty:
@@ -106,27 +122,20 @@ else:
             else:
                 st.write(f"{sel_day}요일 데이터가 아직 없습니다.")
 
-    # 날짜별 상세 관리 탭
     with tab3:
         st.subheader("🗓️ 날짜별 기록 조회 및 관리")
-        
-        # 날짜 선택
         selected_date = st.date_input("조회 및 관리할 날짜를 선택하세요")
-        
-        # 선택한 날짜의 데이터 필터링
         target_df = df[df['날짜'].dt.date == selected_date]
         
         if target_df.empty:
             st.info(f"{selected_date}에 기록된 공부 데이터가 없습니다.")
         else:
             st.write(f"**{selected_date} 학습 기록**")
-            # 보기 편하도록 표 형태로 출력
             st.dataframe(target_df[['과목', '시간']], use_container_width=True)
             
             st.divider()
             st.subheader("데이터 수정 및 삭제")
             
-            # 관리할 특정 기록 선택
             target_idx = st.selectbox(
                 "수정 또는 삭제할 과목 기록을 선택하세요", 
                 target_df.index, 
@@ -134,7 +143,6 @@ else:
             )
             
             if target_idx is not None:
-                # 새로운 시간 입력 (시작점 0.0 수정)
                 new_time = st.number_input(
                     "새로운 공부 시간 (h)", 
                     min_value=0.0, 
@@ -144,23 +152,23 @@ else:
                 
                 col_btn1, col_btn2 = st.columns(2)
                 
-                # 시간 수정 버튼
                 with col_btn1:
                     if st.button("⏳ 시간 수정 저장", use_container_width=True):
                         if new_time > 0:
                             updated_df = df.copy()
                             updated_df.loc[target_idx, '시간'] = new_time
-                            conn.update(spreadsheet=st.secrets["public_gsheets_url"], data=updated_df)
+                            save_df = updated_df.drop(columns=['요일'], errors='ignore')
+                            update_data(save_df)
                             st.success("공부 시간이 성공적으로 수정되었습니다.")
                             st.rerun()
                         else:
                             st.warning("0보다 큰 시간을 입력하세요.")
                 
-                # 기록 삭제 버튼
                 with col_btn2:
-                    if st.button("🗑️ 이 과목 기록 완전히 삭제", use_container_width=True):
-                        updated_df = df.drop(target_idx)
-                        conn.update(spreadsheet=st.secrets["public_gsheets_url"], data=updated_df)
+                    if st.button("🗑️ 이 과목 기록 완전히 삭제", use_container_width=True, type="primary"):
+                        updated_df = df.drop(target_idx).reset_index(drop=True)
+                        save_df = updated_df.drop(columns=['요일'], errors='ignore')
+                        update_data(save_df)
                         st.warning("해당 과목의 기록이 삭제되었습니다.")
                         st.rerun()
 
