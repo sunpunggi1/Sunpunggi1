@@ -8,14 +8,16 @@ import json
 st.set_page_config(page_title="최현규의 열공 대시보드", layout="wide")
 st.title("🚀 최현규의 데이터 기반 학습 시스템")
 
-# 2. 구글 시트 연결 (JSON 키 파싱 오류 해결)
-try:
-    # Secrets에 문자열로 저장된 JSON 데이터를 파싱하여 명시적으로 권한 부여
-    sa_info = json.loads(st.secrets["connections"]["gsheets"]["service_account"])
-    conn = st.connection("gsheets", type=GSheetsConnection, service_account_info=sa_info)
-except Exception:
-    # 파싱 실패 시 기본 연결 (읽기 전용 모드로 빠질 수 있음)
-    conn = st.connection("gsheets", type=GSheetsConnection)
+# 2. 구글 시트 연결 (오류 원인 완벽 해결: 올바른 파라미터명 사용)
+sa_data = st.secrets["connections"]["gsheets"]["service_account"]
+# JSON 문자열인 경우 딕셔너리로 확실하게 변환
+if isinstance(sa_data, str):
+    sa_dict = json.loads(sa_data)
+else:
+    sa_dict = sa_data
+
+# service_account_info가 아닌 service_account 파라미터를 사용하여 강제 쓰기 권한 취득
+conn = st.connection("gsheets", type=GSheetsConnection, service_account=sa_dict)
 
 # 데이터 불러오기 함수 (실시간 반영을 위해 TTL=0)
 def get_data():
