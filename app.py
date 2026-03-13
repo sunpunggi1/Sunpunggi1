@@ -39,7 +39,7 @@ def get_data():
     except Exception:
         return pd.DataFrame(columns=['날짜', '과목', '시간'])
 
-# 데이터 업데이트 함수 (권한 에러 예외 처리 추가)
+# 데이터 업데이트 함수 (권한 에러 예외 처리 추가 및 gspread 문법 오류 수정)
 def update_data(updated_df):
     try:
         ws.clear()
@@ -47,7 +47,8 @@ def update_data(updated_df):
         save_df['날짜'] = save_df['날짜'].astype(str)
         # 데이터 리스트 변환 후 저장
         data = [save_df.columns.values.tolist()] + save_df.values.tolist()
-        ws.update(values=data)
+        # gspread 최신 버전 요구사항에 맞춰 시작 범위('A1') 명시
+        ws.update(range_name='A1', values=data)
     except gspread.exceptions.APIError as e:
         st.error(f"구글 시트 쓰기(편집) 권한이 없습니다. 서비스 계정 이메일이 시트의 '편집자'로 등록되어 있는지 확인하세요. 상세 오류: {e}")
         st.stop()
