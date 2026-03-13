@@ -2,13 +2,20 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import plotly.express as px
+import json
 
 # 1. 페이지 설정
 st.set_page_config(page_title="최현규의 열공 대시보드", layout="wide")
 st.title("🚀 최현규의 데이터 기반 학습 시스템")
 
-# 2. 구글 시트 연결
-conn = st.connection("gsheets", type=GSheetsConnection)
+# 2. 구글 시트 연결 (JSON 키 파싱 오류 해결)
+try:
+    # Secrets에 문자열로 저장된 JSON 데이터를 파싱하여 명시적으로 권한 부여
+    sa_info = json.loads(st.secrets["connections"]["gsheets"]["service_account"])
+    conn = st.connection("gsheets", type=GSheetsConnection, service_account_info=sa_info)
+except Exception:
+    # 파싱 실패 시 기본 연결 (읽기 전용 모드로 빠질 수 있음)
+    conn = st.connection("gsheets", type=GSheetsConnection)
 
 # 데이터 불러오기 함수 (실시간 반영을 위해 TTL=0)
 def get_data():
@@ -26,15 +33,19 @@ with st.sidebar:
     with st.form("input_form", clear_on_submit=True):
         date = st.date_input("날짜")
         subject = st.selectbox("과목", ["국어", "수학", "영어", "사회문화", "지구과학I", "한국사"])
-        time = st.number_input("시간 (h)", min_value=0.1, step=0.5)
+        # 시작점을 0.0으로 수정
+        time = st.number_input("시간 (h)", min_value=0.0, step=0.5, value=0.0)
         submit = st.form_submit_button("구글 시트에 저장")
         
         if submit:
-            new_row = pd.DataFrame([{"날짜": str(date), "과목": subject, "시간": time}])
-            updated_df = pd.concat([df, new_row], ignore_index=True)
-            conn.update(spreadsheet=st.secrets["public_gsheets_url"], data=updated_df)
-            st.success("기록 완료!")
-            st.rerun()
+            if time > 0:
+                new_row = pd.DataFrame([{"날짜": str(date), "과목": subject, "시간": time}])
+                updated_df = pd.concat([df, new_row], ignore_index=True)
+                conn.update(spreadsheet=st.secrets["public_gsheets_url"], data=updated_df)
+                st.success("기록 완료!")
+                st.rerun()
+            else:
+                st.warning("0시간 이상 입력해주세요.")
 
     st.divider()
     st.header("🗑️ 최근 기록 삭제")
@@ -93,7 +104,7 @@ else:
             else:
                 st.write(f"{sel_day}요일 데이터가 아직 없습니다.")
 
-    # 신규 추가: 날짜별 상세 관리 탭
+    # 날짜별 상세 관리 탭
     with tab3:
         st.subheader("🗓️ 날짜별 기록 조회 및 관리")
         
@@ -121,10 +132,10 @@ else:
             )
             
             if target_idx is not None:
-                # 새로운 시간 입력
+                # 새로운 시간 입력 (시작점 0.0 수정)
                 new_time = st.number_input(
                     "새로운 공부 시간 (h)", 
-                    min_value=0.1, 
+                    min_value=0.0, 
                     step=0.5, 
                     value=float(df.loc[target_idx, '시간'])
                 )
@@ -134,11 +145,14 @@ else:
                 # 시간 수정 버튼
                 with col_btn1:
                     if st.button("⏳ 시간 수정 저장", use_container_width=True):
-                        updated_df = df.copy()
-                        updated_df.loc[target_idx, '시간'] = new_time
-                        conn.update(spreadsheet=st.secrets["public_gsheets_url"], data=updated_df)
-                        st.success("공부 시간이 성공적으로 수정되었습니다.")
-                        st.rerun()
+                        if new_time > 0:
+                            updated_df = df.copy()
+                            updated_df.loc[target_idx, '시간'] = new_time
+                            conn.update(spreadsheet=st.secrets["public_gsheets_url"], data=updated_df)
+                            st.success("공부 시간이 성공적으로 수정되었습니다.")
+                            st.rerun()
+                        else:
+                            st.warning("0보다 큰 시간을 입력하세요.")
                 
                 # 기록 삭제 버튼
                 with col_btn2:
