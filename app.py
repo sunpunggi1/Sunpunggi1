@@ -4,6 +4,11 @@ import plotly.express as px
 import json
 import gspread
 import calendar
+try:
+    import holidays
+    HAS_HOLIDAYS = True
+except ImportError:
+    HAS_HOLIDAYS = False
 
 # 1. 페이지 설정
 st.set_page_config(page_title="최현규의 열공 대시보드", layout="wide")
@@ -18,13 +23,13 @@ if 'cal_view_date' not in st.session_state:
     st.session_state['cal_view_date'] = pd.to_datetime(today).replace(day=1).date()
 
 if 'cal_goal' not in st.session_state:
-    st.session_state['cal_goal'] = 5.0
+    st.session_state['cal_goal'] = 3.0
 if 'cal_c1' not in st.session_state:
     st.session_state['cal_c1'] = "#D4EDDA"
 if 'cal_c2' not in st.session_state:
     st.session_state['cal_c2'] = "#FFF3CD"
 if 'cal_c3' not in st.session_state:
-    st.session_state['cal_c3'] = "#F8D7DA"
+    st.session_state['cal_c3'] = "#FFFFFF"
 
 if 'active_tab' not in st.session_state:
     st.session_state['active_tab'] = "📊 요약 및 추이"
@@ -345,6 +350,11 @@ else:
         cal = calendar.Calendar(firstweekday=6)
         month_days = cal.monthdatescalendar(cal_year, cal_month)
         
+        if HAS_HOLIDAYS:
+            kr_holidays = holidays.KR(years=[cal_year])
+        else:
+            kr_holidays = {}
+        
         daily_stats = {}
         for week in month_days:
             for d in week:
@@ -411,10 +421,24 @@ else:
                             bg_color = color3
                         text = f"<span class='cal-hours'>{h:.1f} h</span>"
 
+                    # 공휴일 및 주말 날짜 색상 설정
+                    is_holiday = d in kr_holidays
+                    is_sunday = d.weekday() == 6
+                    is_saturday = d.weekday() == 5
+                    
+                    if is_holiday or is_sunday:
+                        day_color = "#dc3545" # 빨간색
+                    elif is_saturday:
+                        day_color = "#007bff" # 파란색
+                    else:
+                        day_color = "inherit"
+                        
+                    holiday_name = f" title='{kr_holidays.get(d)}'" if is_holiday else ""
+
                     href = f"?date={d}&goal={q_goal}&c1={q_c1}&c2={q_c2}&c3={q_c3}"
                     html += f"<a href='{href}' target='_self' style='text-decoration: none; color: inherit;'>"
                     html += f"<div class='cal-cell' style='background-color: {bg_color}; opacity: {opacity}; {stripe_css}'>"
-                    html += f"<span class='cal-day-num'>{d.day}</span>{text}"
+                    html += f"<span class='cal-day-num' style='color: {day_color};'{holiday_name}>{d.day}</span>{text}"
                     html += "</div></a>"
                     
         html += "</div>"
