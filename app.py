@@ -298,20 +298,27 @@ else:
         with col_title:
             st.subheader("요일별 학습 패턴 및 인사이트")
         with col_check:
-            # 신규: 빨간 날 제외 버튼
+            # 신규: 제외 버튼 그룹 (빨간 날 & 토요일)
             exclude_red_days = st.checkbox("🎈 빨간 날(공휴일/일요일) 제외", value=False)
+            exclude_saturdays = st.checkbox("🌊 토요일 제외", value=False)
             
         avg_method = st.radio("📊 평균 계산 기준", ["공부한 날만 포함", "쉬었던 날 포함(인정결석 제외)", "쉬었던 날(0시간) 포함"], horizontal=True)
         
         target_study_df = study_df.copy()
         target_dates_desc = active_dates_desc.copy()
         
-        # 빨간 날 제외 로직 적용
-        if exclude_red_days:
-            cal_year = today.year # 대략적 당해 기준
-            kr_holidays = holidays.KR(years=range(cal_year-2, cal_year+2)) if HAS_HOLIDAYS else {}
-            # 일요일(6) 이거나 공휴일인 데이터 제외
-            target_study_df = target_study_df[~target_study_df['날짜_date'].apply(lambda d: d.weekday() == 6 or d in kr_holidays)]
+        cal_year = today.year # 대략적 당해 기준
+        kr_holidays = holidays.KR(years=range(cal_year-2, cal_year+2)) if HAS_HOLIDAYS else {}
+
+        # 날짜 제외 판별 함수
+        def is_excluded(d):
+            if exclude_red_days and (d.weekday() == 6 or (HAS_HOLIDAYS and d in kr_holidays)): return True
+            if exclude_saturdays and d.weekday() == 5: return True
+            return False
+
+        # 제외 로직 통합 적용
+        if exclude_red_days or exclude_saturdays:
+            target_study_df = target_study_df[~target_study_df['날짜_date'].apply(is_excluded)]
         
         col_left, col_right = st.columns(2)
         daily_sum_df = target_study_df.groupby(['날짜_date', '요일'], observed=True)['시간'].sum().reset_index()
@@ -324,9 +331,9 @@ else:
                 full_dates = pd.date_range(start=first_d, end=today)
                 full_df = pd.DataFrame({'날짜_date': full_dates.date})
                 
-                # 빨간날 제외 처리 시 분모(full_df)에서도 빨간날을 빼주어야 함
-                if exclude_red_days:
-                    full_df = full_df[~full_df['날짜_date'].apply(lambda d: d.weekday() == 6 or (HAS_HOLIDAYS and d in kr_holidays))]
+                # 제외 처리 시 분모(full_df)에서도 빼주어야 함
+                if exclude_red_days or exclude_saturdays:
+                    full_df = full_df[~full_df['날짜_date'].apply(is_excluded)]
                 
                 full_df['요일'] = full_df['날짜_date'].apply(lambda d: {0:'월', 1:'화', 2:'수', 3:'목', 4:'금', 5:'토', 6:'일'}[d.weekday()])
                 full_df['요일'] = pd.Categorical(full_df['요일'], categories=['월', '화', '수', '목', '금', '토', '일'], ordered=True)
@@ -353,13 +360,22 @@ else:
                 st.warning(f"💡 데이터 객관화: **{min_day}요일**에는 유독 학습 시간이 짧아지는 패턴이 있습니다.")
             
             st.divider()
-            sel_day = st.radio("분석할 요일", ['월', '화', '수', '목', '금', '토', '일'], horizontal=True)
-            day_df = target_study_df[target_study_df['요일'] == sel_day]
-            if not day_df.empty:
-                fig_pie = px.pie(day_df, values='시간', names='과목', title=f"{sel_day}요일 과목 비중", hole=.4, color='과목', color_discrete_map=st.session_state['subj_colors'])
-                st.plotly_chart(fig_pie, use_container_width=True)
+            
+            # 신규: 제외된 요일은 라디오 버튼 선택지에서도 제거
+            day_options = ['월', '화', '수', '목', '금', '토', '일']
+            if exclude_saturdays: day_options.remove('토')
+            if exclude_red_days: day_options.remove('일')
+            
+            if day_options:
+                sel_day = st.radio("분석할 요일", day_options, horizontal=True)
+                day_df = target_study_df[target_study_df['요일'] == sel_day]
+                if not day_df.empty:
+                    fig_pie = px.pie(day_df, values='시간', names='과목', title=f"{sel_day}요일 과목 비중", hole=.4, color='과목', color_discrete_map=st.session_state['subj_colors'])
+                    st.plotly_chart(fig_pie, use_container_width=True)
+                else:
+                    st.write(f"{sel_day}요일에 학습한 데이터가 아직 없습니다.")
             else:
-                st.write(f"{sel_day}요일에 학습한 데이터가 아직 없습니다.")
+                st.write("선택할 수 있는 요일이 없습니다.")
 
     elif selected_tab == "🗓️ 학습 캘린더 및 관리":
         st.subheader("🗓️ 학습 캘린더 및 상세 관리")
