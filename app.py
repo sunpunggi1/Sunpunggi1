@@ -369,11 +369,14 @@ else:
         html = "<style>"
         html += ".cal-container { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 20px; }"
         html += ".cal-header { text-align: center; font-weight: bold; color: #555; padding: 5px 0; }"
-        html += ".cal-cell { min-height: 80px; padding: 8px; border-radius: 8px; border: 1px solid #ddd; display: flex; flex-direction: column; justify-content: space-between; color: #333; box-shadow: 1px 1px 3px rgba(0,0,0,0.05); transition: all 0.2s ease; }"
+        # min-height 대신 height 고정 부여 및 넘침 방지(overflow) 추가
+        html += ".cal-cell { height: 95px; padding: 8px; border-radius: 8px; border: 1px solid #ddd; display: flex; flex-direction: column; justify-content: space-between; color: #333; box-shadow: 1px 1px 3px rgba(0,0,0,0.05); transition: all 0.2s ease; overflow: hidden; }"
         html += ".cal-cell:hover { transform: translateY(-3px); box-shadow: 2px 4px 8px rgba(0,0,0,0.15); border-color: #999; cursor: pointer; }"
         html += ".cal-day-num { font-weight: bold; font-size: 1.1em; margin-bottom: 5px; }"
         html += ".cal-hours { font-size: 0.95em; align-self: flex-end; font-weight: bold; }"
-        html += ".cal-reason { font-size: 0.85em; color: #dc3545; font-weight: bold; line-height: 1.2; margin-top: 5px; }"
+        html += ".cal-reason { font-size: 0.85em; color: #dc3545; font-weight: bold; line-height: 1.2; margin-top: 2px; }"
+        # 긴 사유 텍스트 말줄임표 처리 CSS 추가
+        html += ".cal-reason-text { font-weight: normal; color: #555; font-size: 0.9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }"
         html += ".cal-empty { background-color: transparent; border: none; box-shadow: none; }"
         html += "</style><div class='cal-container'>"
         
@@ -410,7 +413,8 @@ else:
                         bg_color = "#e9ecef"
                         opacity = "0.85"
                         stripe_css = "background-image: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.08) 10px, rgba(0,0,0,0.08) 20px);"
-                        text = f"<span class='cal-reason'>🚫 인정결석<br><span style='font-weight: normal; color: #555;'>{reason}</span></span>"
+                        # 텍스트 넘침 방지를 위해 div 태그 및 cal-reason-text 클래스 분리
+                        text = f"<div class='cal-reason'>🚫 인정결석<div class='cal-reason-text'>{reason}</div></div>"
                     else:
                         opacity = "1"
                         if h >= n_hours:
