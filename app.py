@@ -9,6 +9,18 @@ import calendar
 st.set_page_config(page_title="최현규의 열공 대시보드", layout="wide")
 st.title("🚀 최현규의 데이터 기반 학습 시스템")
 
+# --- 신규: 달력 클릭(URL 파라미터) 연동 로직 ---
+today = pd.Timestamp.now().date()
+if 'selected_date' not in st.session_state:
+    st.session_state['selected_date'] = today
+
+# 달력 칸을 클릭해서 URL에 ?date=... 가 추가되면 이를 감지하여 선택된 날짜로 지정
+if "date" in st.query_params:
+    try:
+        st.session_state['selected_date'] = pd.to_datetime(st.query_params["date"]).date()
+    except:
+        pass
+
 # 2. 구글 시트 직접 연결
 @st.cache_resource
 def init_connection():
@@ -50,7 +62,6 @@ def update_data(updated_df):
         save_df = updated_df.copy()
         save_df['날짜'] = save_df['날짜'].astype(str)
         save_df['사유'] = save_df['사유'].astype(str)
-        # 데이터 리스트 변환 후 저장
         data = [save_df.columns.values.tolist()] + save_df.values.tolist()
         ws.update(range_name='A1', values=data)
     except gspread.exceptions.APIError as e:
@@ -62,7 +73,6 @@ def update_data(updated_df):
 
 df = get_data()
 
-# 데이터가 아예 비어있을 경우 초기화
 if df.empty or '날짜' not in df.columns:
     df = pd.DataFrame(columns=['날짜', '과목', '시간', '사유'])
 
@@ -74,7 +84,8 @@ with st.sidebar:
 
     st.header("📝 학습 기록")
     with st.form("input_form", clear_on_submit=True):
-        date = st.date_input("날짜")
+        # 달력을 클릭하면 사이드바의 신규 입력 날짜도 자동으로 맞춰짐
+        date = st.date_input("날짜", value=st.session_state['selected_date'])
         subject = st.selectbox("과목", ["국어", "수학", "영어", "사회문화", "지구과학I", "한국사"])
         time = st.number_input("시간 (h)", min_value=0.0, step=0.5, value=0.0)
         submit = st.form_submit_button("구글 시트에 저장")
@@ -92,7 +103,6 @@ with st.sidebar:
     st.divider()
     st.header("🗑️ 최근 기록 삭제")
     if not df.empty:
-        # 인덱스를 역순으로 뒤집어 최신 기록이 상단에 오도록 수정
         reversed_idx = list(reversed(df.index))
         def format_delete_item(x):
             row = df.loc[x]
@@ -111,28 +121,23 @@ with st.sidebar:
 if df.empty:
     st.info("데이터가 없습니다. 왼쪽 사이드바에서 첫 공부 기록을 시작해보세요!")
 else:
-    # 날짜 데이터 전처리
     df['날짜'] = pd.to_datetime(df['날짜'])
     days_map = {0:'월', 1:'화', 2:'수', 3:'목', 4:'금', 5:'토', 6:'일'}
     df['요일'] = df['날짜'].dt.dayofweek.map(days_map)
     day_order = ['월', '화', '수', '목', '금', '토', '일']
     df['요일'] = pd.Categorical(df['요일'], categories=day_order, ordered=True)
 
-    # 기본 공부 데이터와 인정결석 데이터 분리
     study_df = df[df['과목'] != '인정결석']
     absence_df = df[df['과목'] == '인정결석']
 
-    # 연속 학습일(Streak) 및 쉰 날 계산 (인정결석도 활동으로 인정하여 스트릭 유지)
     active_dates = set(df[(df['시간'] > 0) | (df['과목'] == '인정결석')]['날짜'].dt.date)
     active_dates_desc = sorted(list(active_dates), reverse=True)
-    today = pd.Timestamp.now().date()
     
     streak_count = 0
     total_rest_days = 0
     max_break = 0
 
     if active_dates_desc:
-        # 스트릭 계산
         if active_dates_desc[0] == today or active_dates_desc[0] == today - pd.Timedelta(days=1):
             streak_count = 1
             curr_d = active_dates_desc[0]
@@ -143,14 +148,10 @@ else:
                 else:
                     break
         
-        # 총 쉰 날 및 최장 휴식일 계산
         first_date = sorted(list(active_dates))[0]
         full_date_range = pd.date_range(start=first_date, end=today).date
-        
-        # 기록이 아예 없는 날 = 쉰 날
         total_rest_days = len([d for d in full_date_range if d not in active_dates])
         
-        # 최장 휴식일 (연속으로 쉰 날의 최댓값)
         current_break = 0
         for d in full_date_range:
             if d not in active_dates:
@@ -160,19 +161,15 @@ else:
             else:
                 current_break = 0
 
-    # 이번 주 데이터 필터링 (월요일 기점)
     now_ts = pd.Timestamp.now().normalize()
     start_of_week = now_ts - pd.Timedelta(days=now_ts.dayofweek)
     this_week_df = study_df[study_df['날짜'] >= start_of_week]
     this_week_hours = this_week_df['시간'].sum()
 
-    # 탭 3개로 확장
     tab1, tab2, tab3 = st.tabs(["📊 요약 및 추이", "📅 요일별 집중 분석", "🗓️ 학습 캘린더 및 관리"])
 
     with tab1:
         st.subheader("📊 기간별 학습 요약 및 달성도")
-        
-        # 상단 지표
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("총 공부 시간", f"{study_df['시간'].sum():.1f}h")
         c2.metric("🔥 연속 활동일", f"{streak_count}일")
@@ -228,17 +225,9 @@ else:
 
     with tab2:
         st.subheader("요일별 학습 패턴 및 인사이트")
-        
-        # 계산 방식 선택 필터 (3가지로 세분화)
-        avg_method = st.radio(
-            "📊 평균 계산 기준", 
-            ["공부한 날만 포함", "쉬었던 날 포함(인정결석 제외)", "쉬었던 날(0시간) 포함"], 
-            horizontal=True
-        )
+        avg_method = st.radio("📊 평균 계산 기준", ["공부한 날만 포함", "쉬었던 날 포함(인정결석 제외)", "쉬었던 날(0시간) 포함"], horizontal=True)
         
         col_left, col_right = st.columns(2)
-        
-        # 순수 공부 기록 기반 요일별 합계
         daily_sum_df = study_df.groupby(['날짜', '요일'], observed=True)['시간'].sum().reset_index()
         
         if avg_method == "공부한 날만 포함":
@@ -251,10 +240,7 @@ else:
                 full_df['요일'] = full_df['날짜'].dt.dayofweek.map(days_map)
                 full_df['요일'] = pd.Categorical(full_df['요일'], categories=day_order, ordered=True)
                 
-                # 인정결석일 목록 추출
                 absence_date_list = absence_df['날짜'].dt.date.unique()
-                
-                # 인정결석 제외 옵션 선택 시 전체 날짜 모수에서 인정결석일을 뺌
                 if avg_method == "쉬었던 날 포함(인정결석 제외)":
                     full_df = full_df[~full_df['날짜'].dt.date.isin(absence_date_list)]
                 
@@ -286,7 +272,6 @@ else:
     with tab3:
         st.subheader("🗓️ 학습 캘린더 및 상세 관리")
         
-        # 캘린더 렌더링을 위한 옵션 설정
         with st.expander("🎨 캘린더 색상 및 목표 기준 설정"):
             n_hours = st.number_input("목표 달성 기준 시간 (n시간)", min_value=0.1, value=5.0, step=0.5)
             cc1, cc2, cc3 = st.columns(3)
@@ -297,11 +282,11 @@ else:
             with cc3:
                 color3 = st.color_picker("공부 안 한 날 (0h)", "#F8D7DA")
 
+        # 달력 년월 선택 (기본값: 클릭한 날짜 기준 동기화)
         col_y, col_m = st.columns(2)
-        cal_year = col_y.selectbox("연도", range(2023, 2031), index=(today.year - 2023) if today.year >= 2023 else 0)
-        cal_month = col_m.selectbox("월", range(1, 13), index=today.month - 1)
+        cal_year = col_y.selectbox("연도", range(2023, 2031), index=st.session_state['selected_date'].year - 2023)
+        cal_month = col_m.selectbox("월", range(1, 13), index=st.session_state['selected_date'].month - 1)
 
-        # 캘린더 HTML 생성 로직
         cal = calendar.Calendar(firstweekday=0)
         month_days = cal.monthdatescalendar(cal_year, cal_month)
         
@@ -316,10 +301,13 @@ else:
                     total_h = target_df[target_df['과목'] != '인정결석']['시간'].sum()
                     daily_stats[d] = {'hours': total_h, 'is_absence': is_absence, 'reason': reason}
 
+        # --- HTML CSS 마크다운 충돌 해결 및 애니메이션/클릭 연결 추가 ---
         html = "<style>"
         html += ".cal-container { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 20px; }"
         html += ".cal-header { text-align: center; font-weight: bold; color: #555; padding: 5px 0; }"
-        html += ".cal-cell { min-height: 80px; padding: 8px; border-radius: 8px; border: 1px solid #ddd; display: flex; flex-direction: column; justify-content: space-between; color: #333; box-shadow: 1px 1px 3px rgba(0,0,0,0.05); }"
+        # hover 애니메이션 및 클릭 커서 추가
+        html += ".cal-cell { min-height: 80px; padding: 8px; border-radius: 8px; border: 1px solid #ddd; display: flex; flex-direction: column; justify-content: space-between; color: #333; box-shadow: 1px 1px 3px rgba(0,0,0,0.05); transition: all 0.2s ease; }"
+        html += ".cal-cell:hover { transform: translateY(-3px); box-shadow: 2px 4px 8px rgba(0,0,0,0.15); border-color: #999; cursor: pointer; }"
         html += ".cal-day-num { font-weight: bold; font-size: 1.1em; margin-bottom: 5px; }"
         html += ".cal-hours { font-size: 0.95em; align-self: flex-end; font-weight: bold; }"
         html += ".cal-reason { font-size: 0.85em; color: #555; font-style: italic; line-height: 1.2; margin-top: 5px; }"
@@ -329,7 +317,6 @@ else:
         for day_name in ["월", "화", "수", "목", "금", "토", "일"]:
             html += f"<div class='cal-header'>{day_name}</div>"
 
-        # 첫 기록일 이전인지 체크용
         first_d = sorted(list(active_dates))[0] if active_dates else today
 
         for week in month_days:
@@ -342,13 +329,12 @@ else:
                     is_abs = stats['is_absence']
                     reason = stats['reason']
 
-                    # 미래 날짜 또는 첫 기록일 이전 날짜는 하얀색 빈칸 처리
                     if d > today or d < first_d:
                         bg_color = "#FFFFFF"
                         opacity = "0.6"
                         text = ""
                     elif is_abs:
-                        bg_color = "#E9ECEF" # 회색 처리
+                        bg_color = "#E9ECEF"
                         opacity = "0.5"
                         text = f"<span class='cal-reason'>🚫 인정결석<br>{reason}</span>"
                     else:
@@ -361,19 +347,28 @@ else:
                             bg_color = color3
                         text = f"<span class='cal-hours'>{h:.1f} h</span>"
 
-                    html += f"<div class='cal-cell' style='background-color: {bg_color}; opacity: {opacity};'><span class='cal-day-num'>{d.day}</span>{text}</div>"
+                    # 개별 칸을 <a> 태그(링크)로 감싸서 클릭 시 URL 쿼리를 넘기도록 수정
+                    html += f"<a href='?date={d}' target='_self' style='text-decoration: none; color: inherit;'>"
+                    html += f"<div class='cal-cell' style='background-color: {bg_color}; opacity: {opacity};'>"
+                    html += f"<span class='cal-day-num'>{d.day}</span>{text}"
+                    html += "</div></a>"
                     
         html += "</div>"
-        
-        # HTML 캘린더 출력
         st.markdown(html, unsafe_allow_html=True)
 
         st.divider()
         st.subheader("🛠️ 특정 날짜 상세 관리 및 결석 처리")
-        selected_date = st.date_input("조회 및 관리할 날짜를 선택하세요")
+        
+        # 달력 클릭 시 동기화되는 관리 날짜 입력기
+        selected_date = st.date_input(
+            "조회 및 관리할 날짜 (위의 달력 칸을 클릭하면 바로 이동합니다)", 
+            value=st.session_state['selected_date']
+        )
+        # 수동 변경을 대비한 세션 동기화
+        st.session_state['selected_date'] = selected_date
+        
         target_df = df[df['날짜'].dt.date == selected_date]
         
-        # 1) 해당 날짜 데이터 표시 및 수정/삭제
         if target_df.empty:
             st.info(f"{selected_date}에 기록된 공부 데이터가 없습니다.")
         else:
@@ -426,7 +421,6 @@ else:
                         st.warning("기록이 삭제되었습니다.")
                         st.rerun()
 
-        # 2) 해당 날짜 인정결석 등록 폼
         st.write("---")
         st.write(f"**📌 {selected_date} 인정결석 등록**")
         with st.form("absence_form", clear_on_submit=True):
@@ -437,7 +431,6 @@ else:
                 if absence_reason.strip() == "":
                     st.warning("사유를 반드시 입력해주세요.")
                 else:
-                    # 기존에 일반 공부기록이 있는 날 인정결석을 추가하면 논리가 꼬일 수 있으나, 유저의 자율에 맡깁니다.
                     new_abs_row = pd.DataFrame([{"날짜": str(selected_date), "과목": "인정결석", "시간": 0.0, "사유": absence_reason}])
                     updated_df = pd.concat([df, new_abs_row], ignore_index=True)
                     save_df = updated_df.drop(columns=['요일'], errors='ignore')
