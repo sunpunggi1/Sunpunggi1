@@ -154,6 +154,8 @@ with st.sidebar:
             date_str = row['날짜'].strftime('%Y-%m-%d')
             if row['과목'] == '인정결석':
                 return f"[{x}] {date_str} - 🚫 인정결석 ({row['사유']})"
+            elif row['과목'] == '메모':
+                return f"[{x}] {date_str} - 📝 메모 ({row['사유']})"
             return f"[{x}] {date_str} - {row['과목']} ({row['시간']}h)"
             
         delete_idx = st.selectbox("빠른 삭제할 기록을 선택하세요 (최신순)", reversed_idx, format_func=format_delete_item)
@@ -167,7 +169,17 @@ with st.sidebar:
 if df.empty:
     st.info("데이터가 없습니다. 왼쪽 사이드바에서 첫 공부 기록을 시작해보세요!")
 else:
-    study_df = df[df['과목'] != '인정결석']
+    # 데이터 전처리 및 오염 방지
+    df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
+    df = df.dropna(subset=['날짜']).copy()
+    
+    days_map = {0:'월', 1:'화', 2:'수', 3:'목', 4:'금', 5:'토', 6:'일'}
+    df['요일'] = df['날짜'].dt.dayofweek.map(days_map)
+    day_order = ['월', '화', '수', '목', '금', '토', '일']
+    df['요일'] = pd.Categorical(df['요일'], categories=day_order, ordered=True)
+
+    # 순수 공부 시간 계산 시 인정결석과 메모 모두 제외
+    study_df = df[(df['과목'] != '인정결석') & (df['과목'] != '메모')]
     absence_df = df[df['과목'] == '인정결석']
 
     active_dates = set(df[(df['시간'] > 0) | (df['과목'] == '인정결석')]['날짜_date'])
@@ -360,22 +372,30 @@ else:
             for d in week:
                 if d.month == cal_month:
                     target_df = df[df['날짜_date'] == d]
+                    
                     abs_data = target_df[target_df['과목'] == '인정결석']
                     is_absence = not abs_data.empty
                     reason = abs_data.iloc[0]['사유'] if is_absence else ""
-                    total_h = target_df[target_df['과목'] != '인정결석']['시간'].sum()
-                    daily_stats[d] = {'hours': total_h, 'is_absence': is_absence, 'reason': reason}
+                    
+                    memo_data = target_df[target_df['과목'] == '메모']
+                    memo_text = ", ".join(memo_data['사유'].tolist()) if not memo_data.empty else ""
+                    
+                    total_h = target_df[(target_df['과목'] != '인정결석') & (target_df['과목'] != '메모')]['시간'].sum()
+                    daily_stats[d] = {'hours': total_h, 'is_absence': is_absence, 'reason': reason, 'memo': memo_text}
 
         html = "<style>"
         html += ".cal-container { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 20px; }"
         html += ".cal-header { text-align: center; font-weight: bold; color: #555; padding: 5px 0; }"
-        # min-height 대신 height 고정 부여 및 넘침 방지(overflow) 추가
-        html += ".cal-cell { height: 95px; padding: 8px; border-radius: 8px; border: 1px solid #ddd; display: flex; flex-direction: column; justify-content: space-between; color: #333; box-shadow: 1px 1px 3px rgba(0,0,0,0.05); transition: all 0.2s ease; overflow: hidden; }"
+        # 메모 및 공휴일 표시를 위해 셀 높이 증가 및 내부 flex 정렬 수정
+        html += ".cal-cell { height: 110px; padding: 6px; border-radius: 8px; border: 1px solid #ddd; display: flex; flex-direction: column; justify-content: space-between; color: #333; box-shadow: 1px 1px 3px rgba(0,0,0,0.05); transition: all 0.2s ease; overflow: hidden; }"
         html += ".cal-cell:hover { transform: translateY(-3px); box-shadow: 2px 4px 8px rgba(0,0,0,0.15); border-color: #999; cursor: pointer; }"
-        html += ".cal-day-num { font-weight: bold; font-size: 1.1em; margin-bottom: 5px; }"
-        html += ".cal-hours { font-size: 0.95em; align-self: flex-end; font-weight: bold; }"
-        html += ".cal-reason { font-size: 0.85em; color: #dc3545; font-weight: bold; line-height: 1.2; margin-top: 2px; }"
-        # 긴 사유 텍스트 말줄임표 처리 CSS 추가
+        html += ".cal-top { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.1; }"
+        html += ".cal-bottom { display: flex; flex-direction: column; align-items: flex-end; width: 100%; }"
+        html += ".cal-day-num { font-weight: bold; font-size: 1.1em; margin-bottom: 2px; }"
+        html += ".cal-holiday { font-size: 0.7em; color: #dc3545; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }"
+        html += ".cal-memo { font-size: 0.75em; color: #495057; background: rgba(255,255,255,0.6); padding: 1px 4px; border-radius: 4px; border: 1px solid #dee2e6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; align-self: flex-start; margin-bottom: 2px; }"
+        html += ".cal-hours { font-size: 0.95em; font-weight: bold; }"
+        html += ".cal-reason { font-size: 0.8em; color: #dc3545; font-weight: bold; line-height: 1.2; text-align: right; width: 100%; }"
         html += ".cal-reason-text { font-weight: normal; color: #555; font-size: 0.9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }"
         html += ".cal-empty { background-color: transparent; border: none; box-shadow: none; }"
         html += "</style><div class='cal-container'>"
@@ -402,19 +422,19 @@ else:
                     h = stats['hours']
                     is_abs = stats['is_absence']
                     reason = stats['reason']
+                    memo = stats['memo']
 
                     stripe_css = ""
                     if d > today or d < first_d:
                         bg_color = "#FFFFFF"
                         opacity = "0.6"
-                        text = ""
+                        bottom_content = ""
                     elif is_abs:
-                        # 인정결석 시각화 개선: 더 어둡게, 빗금 촘촘하게, 텍스트 눈에 띄게
                         bg_color = "#e9ecef"
                         opacity = "0.85"
                         stripe_css = "background-image: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.08) 10px, rgba(0,0,0,0.08) 20px);"
-                        # 텍스트 넘침 방지를 위해 div 태그 및 cal-reason-text 클래스 분리
-                        text = f"<div class='cal-reason'>🚫 인정결석<div class='cal-reason-text'>{reason}</div></div>"
+                        memo_html = f"<div class='cal-memo'>📝 {memo}</div>" if memo else ""
+                        bottom_content = f"{memo_html}<div class='cal-reason'>🚫 인정결석<div class='cal-reason-text'>{reason}</div></div>"
                     else:
                         opacity = "1"
                         if h >= n_hours:
@@ -423,10 +443,13 @@ else:
                             bg_color = color2
                         else:
                             bg_color = color3
-                        text = f"<span class='cal-hours'>{h:.1f} h</span>"
+                        
+                        memo_html = f"<div class='cal-memo'>📝 {memo}</div>" if memo else ""
+                        bottom_content = f"{memo_html}<span class='cal-hours'>{h:.1f} h</span>"
 
                     # 공휴일 및 주말 날짜 색상 설정
-                    is_holiday = d in kr_holidays
+                    holiday_name_text = kr_holidays.get(d)
+                    is_holiday = bool(holiday_name_text)
                     is_sunday = d.weekday() == 6
                     is_saturday = d.weekday() == 5
                     
@@ -437,12 +460,13 @@ else:
                     else:
                         day_color = "inherit"
                         
-                    holiday_name = f" title='{kr_holidays.get(d)}'" if is_holiday else ""
+                    holiday_html = f"<div class='cal-holiday'>{holiday_name_text}</div>" if is_holiday else ""
 
                     href = f"?date={d}&goal={q_goal}&c1={q_c1}&c2={q_c2}&c3={q_c3}"
                     html += f"<a href='{href}' target='_self' style='text-decoration: none; color: inherit;'>"
                     html += f"<div class='cal-cell' style='background-color: {bg_color}; opacity: {opacity}; {stripe_css}'>"
-                    html += f"<span class='cal-day-num' style='color: {day_color};'{holiday_name}>{d.day}</span>{text}"
+                    html += f"<div class='cal-top'><span class='cal-day-num' style='color: {day_color};'>{d.day}</span>{holiday_html}</div>"
+                    html += f"<div class='cal-bottom'>{bottom_content}</div>"
                     html += "</div></a>"
                     
         html += "</div>"
@@ -468,7 +492,9 @@ else:
             target_idx_list = list(reversed(target_df.index))
             def format_edit_item(x):
                 r = df.loc[x]
-                return f"🚫 인정결석 ({r['사유']})" if r['과목'] == '인정결석' else f"{r['과목']} ({r['시간']}h)"
+                if r['과목'] == '인정결석': return f"🚫 인정결석 ({r['사유']})"
+                elif r['과목'] == '메모': return f"📝 메모 ({r['사유']})"
+                else: return f"{r['과목']} ({r['시간']}h)"
                 
             target_idx = st.selectbox(
                 "수정 또는 삭제할 기록을 선택하세요 (최신순)", 
@@ -478,25 +504,26 @@ else:
             
             if target_idx is not None:
                 is_selected_abs = (df.loc[target_idx, '과목'] == '인정결석')
+                is_selected_memo = (df.loc[target_idx, '과목'] == '메모')
                 
-                if not is_selected_abs:
-                    new_time = st.number_input("새로운 공부 시간 (h)", min_value=0.0, step=0.5, value=float(df.loc[target_idx, '시간']))
+                if is_selected_abs or is_selected_memo:
+                    new_reason = st.text_input("수정할 내용", value=df.loc[target_idx, '사유'])
                 else:
-                    new_reason = st.text_input("새로운 사유", value=df.loc[target_idx, '사유'])
+                    new_time = st.number_input("새로운 공부 시간 (h)", min_value=0.0, step=0.5, value=float(df.loc[target_idx, '시간']))
                 
                 col_btn1, col_btn2 = st.columns(2)
                 
                 with col_btn1:
                     if st.button("⏳ 수정 저장", use_container_width=True):
                         updated_df = df.copy()
-                        if not is_selected_abs:
+                        if is_selected_abs or is_selected_memo:
+                            updated_df.loc[target_idx, '사유'] = new_reason
+                        else:
                             if new_time > 0:
                                 updated_df.loc[target_idx, '시간'] = new_time
                             else:
                                 st.warning("0보다 큰 시간을 입력하세요.")
                                 st.stop()
-                        else:
-                            updated_df.loc[target_idx, '사유'] = new_reason
                             
                         update_data(updated_df)
                         st.success("성공적으로 수정되었습니다.")
@@ -510,20 +537,41 @@ else:
                         st.rerun()
 
         st.write("---")
-        st.write(f"**📌 {selected_date} 인정결석 등록**")
-        with st.form("absence_form", clear_on_submit=True):
-            absence_reason = st.text_input("결석 사유를 입력하세요 (예: 심한 감기몸살, 가족 행사)")
-            submit_abs = st.form_submit_button("인정결석 처리하기")
-            
-            if submit_abs:
-                if absence_reason.strip() == "":
-                    st.warning("사유를 반드시 입력해주세요.")
-                else:
-                    new_abs_row = pd.DataFrame([{"날짜": pd.to_datetime(selected_date), "과목": "인정결석", "시간": 0.0, "사유": absence_reason}])
-                    updated_df = pd.concat([df, new_abs_row], ignore_index=True)
-                    update_data(updated_df)
-                    st.success(f"{selected_date}이(가) 인정결석으로 처리되었습니다.")
-                    st.rerun()
+        
+        # 인정결석 및 메모 폼을 가로로 배치
+        col_form1, col_form2 = st.columns(2)
+        
+        with col_form1:
+            st.write(f"**📌 {selected_date} 메모 등록**")
+            with st.form("memo_form", clear_on_submit=True):
+                memo_reason = st.text_input("일정이나 특이사항을 작게 메모하세요")
+                submit_memo = st.form_submit_button("메모 남기기")
+                
+                if submit_memo:
+                    if memo_reason.strip() == "":
+                        st.warning("메모 내용을 입력해주세요.")
+                    else:
+                        new_memo_row = pd.DataFrame([{"날짜": pd.to_datetime(selected_date), "과목": "메모", "시간": 0.0, "사유": memo_reason}])
+                        updated_df = pd.concat([df, new_memo_row], ignore_index=True)
+                        update_data(updated_df)
+                        st.success("메모가 달력에 등록되었습니다.")
+                        st.rerun()
+
+        with col_form2:
+            st.write(f"**📌 {selected_date} 인정결석 등록**")
+            with st.form("absence_form", clear_on_submit=True):
+                absence_reason = st.text_input("결석 사유를 입력하세요 (예: 감기몸살)")
+                submit_abs = st.form_submit_button("인정결석 처리하기")
+                
+                if submit_abs:
+                    if absence_reason.strip() == "":
+                        st.warning("사유를 반드시 입력해주세요.")
+                    else:
+                        new_abs_row = pd.DataFrame([{"날짜": pd.to_datetime(selected_date), "과목": "인정결석", "시간": 0.0, "사유": absence_reason}])
+                        updated_df = pd.concat([df, new_abs_row], ignore_index=True)
+                        update_data(updated_df)
+                        st.success(f"{selected_date}이(가) 인정결석으로 처리되었습니다.")
+                        st.rerun()
 
     with st.expander("📄 전체 데이터 테이블 확인"):
         # 불필요한 보조 열 숨기고 출력
