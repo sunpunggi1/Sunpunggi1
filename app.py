@@ -463,34 +463,33 @@ else:
                     daily_stats[d] = {'hours': total_h, 'is_absence': is_absence, 'reason': reason, 'memo': memo_text}
 
         html = "<style>"
-        html += ".cal-container { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 20px; }"
+        html += ".cal-container { display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: 1fr; gap: 8px; margin-bottom: 20px; }"
         html += ".cal-header { text-align: center; font-weight: bold; color: #555; padding: 5px 0; }"
         
         # 기본 PC 화면에서의 캘린더 셀 CSS
-        html += ".cal-cell { height: 110px; padding: 6px; border-radius: 8px; border: 1px solid #ddd; display: flex; flex-direction: column; justify-content: space-between; color: #333; box-shadow: 1px 1px 3px rgba(0,0,0,0.05); transition: all 0.2s ease; overflow: hidden; }"
+        html += ".cal-cell { height: 110px; min-height: 0; padding: 6px; border-radius: 8px; border: 1px solid #ddd; display: flex; flex-direction: column; justify-content: space-between; color: #333; box-shadow: 1px 1px 3px rgba(0,0,0,0.05); transition: all 0.2s ease; overflow: hidden; }"
         html += ".cal-cell:hover { transform: translateY(-3px); box-shadow: 2px 4px 8px rgba(0,0,0,0.15); border-color: #999; cursor: pointer; }"
-        html += ".cal-top { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.1; width: 100%; }"
-        html += ".cal-bottom { display: flex; flex-direction: column; align-items: flex-end; width: 100%; }"
+        html += ".cal-top { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.1; width: 100%; overflow: hidden; }"
+        html += ".cal-bottom { display: flex; flex-direction: column; align-items: flex-end; width: 100%; overflow: hidden; }"
         html += ".cal-day-num { font-weight: bold; font-size: 1.1em; margin-bottom: 2px; }"
-        html += ".cal-holiday { font-size: 0.7em; color: #dc3545; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }"
-        html += ".cal-memo { font-size: 0.75em; color: #495057; background: rgba(255,255,255,0.6); padding: 1px 4px; border-radius: 4px; border: 1px solid #dee2e6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; align-self: flex-start; margin-bottom: 2px; }"
-        html += ".cal-hours { font-size: 0.95em; font-weight: bold; }"
-        html += ".cal-reason { font-size: 0.8em; color: #dc3545; font-weight: bold; line-height: 1.2; text-align: right; width: 100%; }"
+        html += ".cal-holiday { font-size: 0.7em; color: #dc3545; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; display: block; }"
+        html += ".cal-memo { font-size: 0.75em; color: #495057; background: rgba(255,255,255,0.6); padding: 1px 4px; border-radius: 4px; border: 1px solid #dee2e6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; align-self: flex-start; margin-bottom: 2px; display: block; box-sizing: border-box; }"
+        html += ".cal-hours { font-size: 0.95em; font-weight: bold; white-space: nowrap; }"
+        html += ".cal-reason { font-size: 0.8em; color: #dc3545; font-weight: bold; line-height: 1.2; text-align: right; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }"
         html += ".cal-reason-text { font-weight: normal; color: #555; font-size: 0.9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }"
         html += ".cal-empty { background-color: transparent; border: none; box-shadow: none; }"
         
         # 모바일 화면을 위한 미디어 쿼리 추가 (화면 너비 768px 이하일 때 적용)
         html += "@media (max-width: 768px) {"
-        html += ".cal-container { gap: 4px; }"
-        html += ".cal-header { font-size: 0.8em; padding: 2px 0; }"  # 요일 헤더 폰트 크기 줄임
-        html += ".cal-cell { height: auto; aspect-ratio: 1 / 1.15; padding: 4px; overflow: hidden; }"  # 셀 높이를 비율로 맞추고 넘침 숨김 처리
+        html += ".cal-container { gap: 4px; grid-auto-rows: 1fr; }"
+        html += ".cal-header { font-size: 0.75em; padding: 2px 0; }"  
+        html += ".cal-cell { height: auto; min-height: 70px; aspect-ratio: 1 / 1.15; padding: 4px; overflow: hidden; }" 
         html += ".cal-day-num { font-size: 0.85em; margin-bottom: 1px; }"
         html += ".cal-hours { font-size: 0.75em; }"
-        html += ".cal-holiday { font-size: 0.6em; }"
-        # 메모 및 사유 텍스트가 셀을 벗어나지 않도록 강제 한 줄 처리(nowrap) 및 말줄임표(...) 설정
-        html += ".cal-memo { font-size: 0.6em; padding: 1px; margin-bottom: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; display: block; }"
-        html += ".cal-reason { font-size: 0.7em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; display: block; }"
-        html += ".cal-reason-text { display: none; }" # 모바일에서는 사유 텍스트 숨김 처리하여 공간 확보
+        html += ".cal-holiday { font-size: 0.55em; }"
+        html += ".cal-memo { font-size: 0.55em; padding: 1px; margin-bottom: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; display: block; box-sizing: border-box; }"
+        html += ".cal-reason { font-size: 0.65em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; display: block; }"
+        html += ".cal-reason-text { display: none; }" 
         html += "}"
         html += "</style><div class='cal-container'>"
         
