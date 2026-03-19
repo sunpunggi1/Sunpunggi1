@@ -9,17 +9,38 @@ import calendar
 st.set_page_config(page_title="최현규의 열공 대시보드", layout="wide")
 st.title("🚀 최현규의 데이터 기반 학습 시스템")
 
-# --- 신규: 달력 클릭(URL 파라미터) 연동 로직 ---
+# --- 신규: 달력 클릭(URL 파라미터) 연동 및 설정 보존 로직 ---
 today = pd.Timestamp.now().date()
 if 'selected_date' not in st.session_state:
     st.session_state['selected_date'] = today
 
-# 달력 칸을 클릭해서 URL에 ?date=... 가 추가되면 이를 감지하여 선택된 날짜로 지정
+# 캘린더 설정 상태 보존용 세션 초기화
+if 'cal_goal' not in st.session_state:
+    st.session_state['cal_goal'] = 5.0
+if 'cal_c1' not in st.session_state:
+    st.session_state['cal_c1'] = "#D4EDDA"
+if 'cal_c2' not in st.session_state:
+    st.session_state['cal_c2'] = "#FFF3CD"
+if 'cal_c3' not in st.session_state:
+    st.session_state['cal_c3'] = "#F8D7DA"
+
+# 달력 칸을 클릭해서 URL에 파라미터가 추가되면 이를 감지하여 날짜 및 설정 복구
 if "date" in st.query_params:
     try:
         st.session_state['selected_date'] = pd.to_datetime(st.query_params["date"]).date()
     except:
         pass
+if "goal" in st.query_params:
+    try:
+        st.session_state['cal_goal'] = float(st.query_params["goal"])
+    except:
+        pass
+if "c1" in st.query_params and len(st.query_params["c1"]) == 6:
+    st.session_state['cal_c1'] = f"#{st.query_params['c1']}"
+if "c2" in st.query_params and len(st.query_params["c2"]) == 6:
+    st.session_state['cal_c2'] = f"#{st.query_params['c2']}"
+if "c3" in st.query_params and len(st.query_params["c3"]) == 6:
+    st.session_state['cal_c3'] = f"#{st.query_params['c3']}"
 
 # 2. 구글 시트 직접 연결
 @st.cache_resource
@@ -84,7 +105,6 @@ with st.sidebar:
 
     st.header("📝 학습 기록")
     with st.form("input_form", clear_on_submit=True):
-        # 달력을 클릭하면 사이드바의 신규 입력 날짜도 자동으로 맞춰짐
         date = st.date_input("날짜", value=st.session_state['selected_date'])
         subject = st.selectbox("과목", ["국어", "수학", "영어", "사회문화", "지구과학I", "한국사"])
         time = st.number_input("시간 (h)", min_value=0.0, step=0.5, value=0.0)
@@ -273,16 +293,21 @@ else:
         st.subheader("🗓️ 학습 캘린더 및 상세 관리")
         
         with st.expander("🎨 캘린더 색상 및 목표 기준 설정"):
-            n_hours = st.number_input("목표 달성 기준 시간 (n시간)", min_value=0.1, value=5.0, step=0.5)
+            # 세션에 저장된 설정값을 불러오고, 수정 시 세션에 즉각 동기화
+            n_hours = st.number_input("목표 달성 기준 시간 (n시간)", min_value=0.1, value=st.session_state['cal_goal'], step=0.5)
+            st.session_state['cal_goal'] = n_hours
+            
             cc1, cc2, cc3 = st.columns(3)
             with cc1:
-                color1 = st.color_picker(f"목표 달성 ({n_hours}h 이상)", "#D4EDDA")
+                color1 = st.color_picker(f"목표 달성 ({n_hours}h 이상)", st.session_state['cal_c1'])
+                st.session_state['cal_c1'] = color1
             with cc2:
-                color2 = st.color_picker(f"부분 달성 ({n_hours}h 미만)", "#FFF3CD")
+                color2 = st.color_picker(f"부분 달성 ({n_hours}h 미만)", st.session_state['cal_c2'])
+                st.session_state['cal_c2'] = color2
             with cc3:
-                color3 = st.color_picker("공부 안 한 날 (0h)", "#F8D7DA")
+                color3 = st.color_picker("공부 안 한 날 (0h)", st.session_state['cal_c3'])
+                st.session_state['cal_c3'] = color3
 
-        # 달력 년월 선택 (기본값: 클릭한 날짜 기준 동기화)
         col_y, col_m = st.columns(2)
         cal_year = col_y.selectbox("연도", range(2023, 2031), index=st.session_state['selected_date'].year - 2023)
         cal_month = col_m.selectbox("월", range(1, 13), index=st.session_state['selected_date'].month - 1)
@@ -301,11 +326,9 @@ else:
                     total_h = target_df[target_df['과목'] != '인정결석']['시간'].sum()
                     daily_stats[d] = {'hours': total_h, 'is_absence': is_absence, 'reason': reason}
 
-        # --- HTML CSS 마크다운 충돌 해결 및 애니메이션/클릭 연결 추가 ---
         html = "<style>"
         html += ".cal-container { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 20px; }"
         html += ".cal-header { text-align: center; font-weight: bold; color: #555; padding: 5px 0; }"
-        # hover 애니메이션 및 클릭 커서 추가
         html += ".cal-cell { min-height: 80px; padding: 8px; border-radius: 8px; border: 1px solid #ddd; display: flex; flex-direction: column; justify-content: space-between; color: #333; box-shadow: 1px 1px 3px rgba(0,0,0,0.05); transition: all 0.2s ease; }"
         html += ".cal-cell:hover { transform: translateY(-3px); box-shadow: 2px 4px 8px rgba(0,0,0,0.15); border-color: #999; cursor: pointer; }"
         html += ".cal-day-num { font-weight: bold; font-size: 1.1em; margin-bottom: 5px; }"
@@ -318,6 +341,12 @@ else:
             html += f"<div class='cal-header'>{day_name}</div>"
 
         first_d = sorted(list(active_dates))[0] if active_dates else today
+        
+        # URL 쿼리에 실어보낼 설정값들 포매팅 (샵 기호 제거)
+        q_goal = st.session_state['cal_goal']
+        q_c1 = st.session_state['cal_c1'].replace('#', '')
+        q_c2 = st.session_state['cal_c2'].replace('#', '')
+        q_c3 = st.session_state['cal_c3'].replace('#', '')
 
         for week in month_days:
             for d in week:
@@ -347,8 +376,9 @@ else:
                             bg_color = color3
                         text = f"<span class='cal-hours'>{h:.1f} h</span>"
 
-                    # 개별 칸을 <a> 태그(링크)로 감싸서 클릭 시 URL 쿼리를 넘기도록 수정
-                    html += f"<a href='?date={d}' target='_self' style='text-decoration: none; color: inherit;'>"
+                    # 클릭 시 현재 색상/시간 설정을 URL에 포함하여 전송
+                    href = f"?date={d}&goal={q_goal}&c1={q_c1}&c2={q_c2}&c3={q_c3}"
+                    html += f"<a href='{href}' target='_self' style='text-decoration: none; color: inherit;'>"
                     html += f"<div class='cal-cell' style='background-color: {bg_color}; opacity: {opacity};'>"
                     html += f"<span class='cal-day-num'>{d.day}</span>{text}"
                     html += "</div></a>"
@@ -359,12 +389,10 @@ else:
         st.divider()
         st.subheader("🛠️ 특정 날짜 상세 관리 및 결석 처리")
         
-        # 달력 클릭 시 동기화되는 관리 날짜 입력기
         selected_date = st.date_input(
             "조회 및 관리할 날짜 (위의 달력 칸을 클릭하면 바로 이동합니다)", 
             value=st.session_state['selected_date']
         )
-        # 수동 변경을 대비한 세션 동기화
         st.session_state['selected_date'] = selected_date
         
         target_df = df[df['날짜'].dt.date == selected_date]
