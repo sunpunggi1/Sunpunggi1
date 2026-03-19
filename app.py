@@ -202,6 +202,7 @@ else:
     # 스트릭 및 총 쉰 날 계산 (A 기준)
     streak_count = 0
     total_rest_days = 0
+    total_rest_days_B = 0
     if active_dates_A:
         active_dates_desc = sorted(list(active_dates_A), reverse=True)
         if active_dates_desc[0] == today or active_dates_desc[0] == today - pd.Timedelta(days=1):
@@ -216,6 +217,7 @@ else:
         first_date = sorted(list(active_dates_A))[0]
         full_date_range = pd.date_range(start=first_date, end=today).date
         total_rest_days = len([d for d in full_date_range if d not in active_dates_A])
+        total_rest_days_B = len([d for d in full_date_range if d not in active_dates_B])
 
     now_ts = pd.Timestamp.now().normalize()
     start_of_week = now_ts - pd.Timedelta(days=now_ts.dayofweek)
@@ -229,24 +231,21 @@ else:
     if selected_tab == "📊 요약 및 추이":
         st.subheader("📊 기간별 학습 요약 및 달성도")
         
-        # 1열 메트릭
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("총 공부 시간", f"{study_df['시간'].sum():.1f}h")
         c2.metric("🔥 연속 활동일", f"{streak_count}일")
         c3.metric("순수 학습일", f"{study_df[study_df['시간']>0]['날짜_date'].nunique()}일")
         c4.metric("총 쉰 날 (공식)", f"{total_rest_days}일")
-        st.divider()
+        c5.metric("총 쉰 날 (인정결석 포함)", f"{total_rest_days_B}일")
 
-        # 최장 휴식기 비교 지표
-        st.markdown("**🏃‍♂️ 휴식기 패턴 분석**")
-        cb1, cb2 = st.columns(2)
-        cb1.metric("최장 휴식기 (인정결석 활동 인정)", f"{max_break_A}일")
-        if max_break_A > 0: cb1.caption(f"기간: {start_A.strftime('%y.%m.%d.')} - {end_A.strftime('%y.%m.%d.')}")
-        else: cb1.caption("꾸준히 기록 중입니다!")
+        c6, c7, c8 = st.columns(3)
+        c6.metric("최장 휴식기 (공식)", f"{max_break_A}일")
+        if max_break_A > 0: c6.caption(f"기간: {start_A.strftime('%y.%m.%d.')} - {end_A.strftime('%y.%m.%d.')}")
+        else: c6.caption("꾸준히 기록 중입니다!")
 
-        cb2.metric("최장 휴식기 (인정결석일 포함 절대휴식)", f"{max_break_B}일")
-        if max_break_B > 0: cb2.caption(f"기간: {start_B.strftime('%y.%m.%d.')} - {end_B.strftime('%y.%m.%d.')}")
-        else: cb2.caption("꾸준히 기록 중입니다!")
+        c7.metric("최장 휴식기 (인정결석 포함)", f"{max_break_B}일")
+        if max_break_B > 0: c7.caption(f"기간: {start_B.strftime('%y.%m.%d.')} - {end_B.strftime('%y.%m.%d.')}")
+        else: c7.caption("꾸준히 기록 중입니다!")
         
         st.divider()
 
