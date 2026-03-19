@@ -14,21 +14,23 @@ except ImportError:
 st.set_page_config(page_title="최현규의 열공 대시보드", layout="wide")
 st.title("🚀 최현규의 데이터 기반 학습 시스템")
 
-# 2. 구글 시트 직접 연결
+# 2. 구글 시트 직접 연결 (연결 및 시트 객체 자체를 캐싱하여 불필요한 통신 방지)
 @st.cache_resource
 def init_connection():
     sa_data = st.secrets["connections"]["gsheets"]["service_account"]
     sa_dict = json.loads(sa_data) if isinstance(sa_data, str) else sa_data
-    return gspread.service_account_from_dict(sa_dict)
+    gc = gspread.service_account_from_dict(sa_dict)
+    sh = gc.open_by_url(st.secrets["public_gsheets_url"])
+    return sh.sheet1
 
 try:
-    gc = init_connection()
-    sh = gc.open_by_url(st.secrets["public_gsheets_url"])
-    ws = sh.sheet1
+    ws = init_connection()
 except Exception as e:
     st.error(f"구글 시트 연결에 실패했습니다. Secrets 설정을 확인해주세요. 상세오류: {e}")
     st.stop()
 
+# --- 데이터 로드 (캐싱을 통해 1분당 API 60회 제한 에러 완벽 방지) ---
+@st.cache_data(ttl=600)
 def get_data():
     try:
         records = ws.get_all_records()
@@ -47,7 +49,7 @@ def get_data():
     except Exception:
         return pd.DataFrame(columns=['날짜', '과목', '시간', '사유'])
 
-# --- 신규: 최적화된 CRUD 함수 분리 ---
+# --- 신규: 최적화된 CRUD 함수 분리 및 캐시 초기화 처리 ---
 def _format_row(row_dict):
     date_val = row_dict.get('날짜', '')
     if hasattr(date_val, 'strftime'): date_val = date_val.strftime('%Y-%m-%d')
@@ -64,6 +66,7 @@ def append_data(row_dict):
     try:
         row_values = _format_row(row_dict)
         ws.append_row(row_values)
+        get_data.clear() # 추가 완료 시 데이터 캐시 초기화
     except Exception as e:
         st.error(f"데이터 추가 중 오류 발생: {e}")
         st.stop()
@@ -74,6 +77,7 @@ def edit_data(df_index, row_dict):
         sheet_row = df_index + 2 # 구글 시트는 1행이 헤더이므로 인덱스값에 +2를 해야 실제 행이 됨
         row_values = [_format_row(row_dict)]
         ws.update(range_name=f'A{sheet_row}:D{sheet_row}', values=row_values)
+        get_data.clear() # 수정 완료 시 데이터 캐시 초기화
     except Exception as e:
         st.error(f"데이터 수정 중 오류 발생: {e}")
         st.stop()
@@ -83,11 +87,29 @@ def delete_data(df_index):
     try:
         sheet_row = df_index + 2
         ws.delete_rows(sheet_row)
+        get_data.clear() # 삭제 완료 시 데이터 캐시 초기화
     except Exception as e:
         st.error(f"데이터 삭제 중 오류 발생: {e}")
         st.stop()
 
-# 데이터 로드 및 전처리
+def update_data(updated_df):
+    """전체 덮어쓰기 로직 (설정 탭 등에서 필요 시 사용)"""
+    try:
+        ws.clear()
+        save_df = updated_df.copy()
+        save_df['날짜'] = pd.to_datetime(save_df['날짜']).dt.strftime('%Y-%m-%d')
+        save_df['사유'] = save_df['사유'].astype(str)
+        cols_to_drop = ['날짜_date', '요일']
+        save_df = save_df.drop(columns=[c for c in cols_to_drop if c in save_df.columns])
+        
+        data = [save_df.columns.values.tolist()] + save_df.values.tolist()
+        ws.update(range_name='A1', values=data)
+        get_data.clear() # 덮어쓰기 완료 시 데이터 캐시 초기화
+    except Exception as e:
+        st.error(f"데이터 업데이트 중 오류 발생: {e}")
+        st.stop()
+
+# 데이터 로드 및 전처리 (캐시된 함수 호출)
 df = get_data()
 
 # --- 설정 데이터(물리적 저장) 불러오기 ---
