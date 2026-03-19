@@ -337,7 +337,7 @@ else:
             exclude_red_days = st.checkbox("🎈 빨간 날(공휴일/일요일) 제외", value=False)
             exclude_saturdays = st.checkbox("🌊 토요일 제외", value=False)
             
-        avg_method = st.radio("📊 평균 계산 기준", ["공부한 날만 포함", "쉬었던 날 포함(인정결석 제외)", "쉬었던 날(0시간) 포함"], horizontal=True)
+        avg_method = st.radio("📊 평균 계산 기준", ["공부한 날만 포함", "쉬었던 날 포함(인정결석 제외)", "쉬었던 날 포함(인정결석 포함)"], horizontal=True)
         
         target_study_df = study_df.copy()
         target_dates_desc = active_dates_desc.copy()
@@ -353,11 +353,15 @@ else:
         if exclude_red_days or exclude_saturdays:
             target_study_df = target_study_df[~target_study_df['날짜_date'].apply(is_excluded)]
         
-        col_left, col_right = st.columns(2)
+        # 총 시간 및 기준 일수 계산 로직
+        total_time = target_study_df['시간'].sum()
+        total_days = 0
+        
         daily_sum_df = target_study_df.groupby(['날짜_date', '요일'], observed=True)['시간'].sum().reset_index()
         
         if avg_method == "공부한 날만 포함":
             week_avg = daily_sum_df[daily_sum_df['시간'] > 0].groupby('요일', observed=True)['시간'].mean().reset_index()
+            total_days = len(daily_sum_df[daily_sum_df['시간'] > 0]['날짜_date'].unique())
         else:
             if target_dates_desc:
                 first_d = sorted(list(target_dates_desc))[0]
@@ -374,11 +378,21 @@ else:
                 if avg_method == "쉬었던 날 포함(인정결석 제외)":
                     full_df = full_df[~full_df['날짜_date'].isin(absence_date_list)]
                 
+                total_days = len(full_df['날짜_date'].unique())
+                
                 merged_df = pd.merge(full_df, daily_sum_df[['날짜_date', '시간']], on='날짜_date', how='left').fillna({'시간': 0})
                 week_avg = merged_df.groupby('요일', observed=True)['시간'].mean().reset_index()
             else:
                 week_avg = pd.DataFrame({'요일': ['월', '화', '수', '목', '금', '토', '일'], '시간': [0]*7})
+                total_days = 0
         
+        overall_avg = (total_time / total_days) if total_days > 0 else 0.0
+        
+        st.metric("💡 해당 조건 일 평균 순공시간", f"{overall_avg:.1f}h", delta=f"총 {total_time:.1f}h / {total_days}일 기준", delta_color="off")
+        st.write("---")
+
+        col_left, col_right = st.columns(2)
+
         with col_left:
             fig_week = px.bar(week_avg, x='요일', y='시간', color='요일', title="요일별 평균 공부 시간", color_discrete_map=rainbow_colors)
             st.plotly_chart(fig_week, use_container_width=True)
