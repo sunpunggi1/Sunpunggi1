@@ -153,7 +153,6 @@ if "date" in st.query_params:
 # 데이터 정리 (원본 인덱스 유지를 위해 필터링 전에 날짜형 변환)
 if not df.empty and '날짜' in df.columns:
     df['날짜'] = pd.to_datetime(df['날짜'].astype(str).str.strip(), errors='coerce')
-    # copy()는 기존 인덱스를 유지함 (sheet_row 매칭에 필수)
     df = df.dropna(subset=['날짜']).copy() 
     df['날짜_date'] = df['날짜'].dt.date
     
@@ -353,7 +352,6 @@ else:
         if exclude_red_days or exclude_saturdays:
             target_study_df = target_study_df[~target_study_df['날짜_date'].apply(is_excluded)]
         
-        # 총 시간 및 기준 일수 계산 로직
         total_time = target_study_df['시간'].sum()
         total_days = 0
         
@@ -463,33 +461,40 @@ else:
                     daily_stats[d] = {'hours': total_h, 'is_absence': is_absence, 'reason': reason, 'memo': memo_text}
 
         html = "<style>"
-        html += ".cal-container { display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: 1fr; gap: 8px; margin-bottom: 20px; }"
+        # 핵심 CSS 수정: 부모 그리드 행 비율 고정, 자식 셀 플렉스 박스 오버플로우 방지 처리
+        html += ".cal-container { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 20px; }"
         html += ".cal-header { text-align: center; font-weight: bold; color: #555; padding: 5px 0; }"
         
         # 기본 PC 화면에서의 캘린더 셀 CSS
         html += ".cal-cell { height: 110px; min-height: 0; padding: 6px; border-radius: 8px; border: 1px solid #ddd; display: flex; flex-direction: column; justify-content: space-between; color: #333; box-shadow: 1px 1px 3px rgba(0,0,0,0.05); transition: all 0.2s ease; overflow: hidden; }"
         html += ".cal-cell:hover { transform: translateY(-3px); box-shadow: 2px 4px 8px rgba(0,0,0,0.15); border-color: #999; cursor: pointer; }"
-        html += ".cal-top { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.1; width: 100%; overflow: hidden; }"
-        html += ".cal-bottom { display: flex; flex-direction: column; align-items: flex-end; width: 100%; overflow: hidden; }"
+        
+        # 플렉스 박스 내부 글자 팽창 방지 (min-width: 0;)
+        html += ".cal-top { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.1; width: 100%; overflow: hidden; min-width: 0; }"
+        html += ".cal-bottom { display: flex; flex-direction: column; align-items: flex-end; width: 100%; overflow: hidden; min-width: 0; }"
+        
         html += ".cal-day-num { font-weight: bold; font-size: 1.1em; margin-bottom: 2px; }"
-        html += ".cal-holiday { font-size: 0.7em; color: #dc3545; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; display: block; }"
-        html += ".cal-memo { font-size: 0.75em; color: #495057; background: rgba(255,255,255,0.6); padding: 1px 4px; border-radius: 4px; border: 1px solid #dee2e6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; align-self: flex-start; margin-bottom: 2px; display: block; box-sizing: border-box; }"
-        html += ".cal-hours { font-size: 0.95em; font-weight: bold; white-space: nowrap; }"
-        html += ".cal-reason { font-size: 0.8em; color: #dc3545; font-weight: bold; line-height: 1.2; text-align: right; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }"
-        html += ".cal-reason-text { font-weight: normal; color: #555; font-size: 0.9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }"
+        html += ".cal-holiday { font-size: 0.7em; color: #dc3545; font-weight: bold; display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }"
+        html += ".cal-memo { font-size: 0.75em; color: #495057; background: rgba(255,255,255,0.6); padding: 1px 4px; border-radius: 4px; border: 1px solid #dee2e6; display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; box-sizing: border-box; }"
+        html += ".cal-hours { font-size: 0.95em; font-weight: bold; white-space: nowrap; display: block; }"
+        html += ".cal-reason { font-size: 0.8em; color: #dc3545; font-weight: bold; line-height: 1.2; text-align: right; display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }"
+        html += ".cal-reason-text { display: none; }" 
         html += ".cal-empty { background-color: transparent; border: none; box-shadow: none; }"
         
-        # 모바일 화면을 위한 미디어 쿼리 추가 (화면 너비 768px 이하일 때 적용)
+        # 모바일 화면 미디어 쿼리 (화면 너비 768px 이하)
         html += "@media (max-width: 768px) {"
-        html += ".cal-container { gap: 4px; grid-auto-rows: 1fr; }"
-        html += ".cal-header { font-size: 0.75em; padding: 2px 0; }"  
-        html += ".cal-cell { height: auto; min-height: 70px; aspect-ratio: 1 / 1.15; padding: 4px; overflow: hidden; }" 
-        html += ".cal-day-num { font-size: 0.85em; margin-bottom: 1px; }"
-        html += ".cal-hours { font-size: 0.75em; }"
-        html += ".cal-holiday { font-size: 0.55em; }"
-        html += ".cal-memo { font-size: 0.55em; padding: 1px; margin-bottom: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; display: block; box-sizing: border-box; }"
-        html += ".cal-reason { font-size: 0.65em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; display: block; }"
-        html += ".cal-reason-text { display: none; }" 
+        html += ".cal-container { gap: 2px; }" # 칸 간격 축소
+        html += ".cal-header { font-size: 0.7em; padding: 2px 0; }" 
+        
+        # aspect-ratio를 제거하고 height를 고정하여 그리드 깨짐 원천 차단
+        html += ".cal-cell { height: 80px; min-height: 80px; aspect-ratio: unset; padding: 3px; overflow: hidden; }" 
+        html += ".cal-day-num { font-size: 0.75em; margin-bottom: 0; }"
+        html += ".cal-hours { font-size: 0.7em; margin-top: auto; }"
+        
+        # 텍스트 오버플로우 방지 (말줄임표 처리)
+        html += ".cal-holiday { font-size: 0.55em; display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }"
+        html += ".cal-memo { font-size: 0.55em; padding: 1px 2px; margin-bottom: 1px; display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box; }"
+        html += ".cal-reason { font-size: 0.6em; text-align: right; display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }"
         html += "}"
         html += "</style><div class='cal-container'>"
         
