@@ -153,7 +153,6 @@ if "date" in st.query_params:
 # 데이터 정리 (원본 인덱스 유지를 위해 필터링 전에 날짜형 변환)
 if not df.empty and '날짜' in df.columns:
     df['날짜'] = pd.to_datetime(df['날짜'].astype(str).str.strip(), errors='coerce')
-    # copy()는 기존 인덱스를 유지함 (sheet_row 매칭에 필수)
     df = df.dropna(subset=['날짜']).copy() 
     df['날짜_date'] = df['날짜'].dt.date
     
@@ -198,6 +197,7 @@ with st.sidebar:
             date_str = row['날짜'].strftime('%Y-%m-%d')
             if row['과목'] == '인정결석': return f"[{x}] {date_str} - 🚫 인정결석 ({row['사유']})"
             elif row['과목'] == '메모': return f"[{x}] {date_str} - 📝 메모 ({row['사유']})"
+            elif row['과목'] == '마음상태': return f"[{x}] {date_str} - 🧠 마음상태 ({row['사유']}점)"
             return f"[{x}] {date_str} - {row['과목']} ({row['시간']}h)"
             
         delete_idx = st.selectbox("빠른 삭제할 기록을 선택하세요 (최신순)", reversed_idx, format_func=format_delete_item)
@@ -210,12 +210,12 @@ with st.sidebar:
 if df.empty:
     st.info("데이터가 없습니다. 왼쪽 사이드바에서 첫 공부 기록을 시작해보세요!")
 else:
-    # 데이터 분류
-    study_df = df[(df['과목'] != '인정결석') & (df['과목'] != '메모') & (df['과목'] != '설정')]
+    # 데이터 분류 (마음상태 추가 제외)
+    study_df = df[(df['과목'] != '인정결석') & (df['과목'] != '메모') & (df['과목'] != '마음상태') & (df['과목'] != '설정')]
     absence_df = df[df['과목'] == '인정결석']
 
     active_dates_A = set(df[((df['시간'] > 0) | (df['과목'] == '인정결석')) & (df['과목'] != '설정')]['날짜_date'])
-    active_dates_B = set(df[(df['시간'] > 0) & (df['과목'] != '설정') & (df['과목'] != '인정결석') & (df['과목'] != '메모')]['날짜_date'])
+    active_dates_B = set(df[(df['시간'] > 0) & (df['과목'] != '설정') & (df['과목'] != '인정결석') & (df['과목'] != '메모') & (df['과목'] != '마음상태')]['날짜_date'])
     
     def calc_longest_break(active_set):
         if not active_set: return 0, None, None
@@ -353,7 +353,6 @@ else:
         if exclude_red_days or exclude_saturdays:
             target_study_df = target_study_df[~target_study_df['날짜_date'].apply(is_excluded)]
         
-        # 총 시간 및 기준 일수 계산 로직
         total_time = target_study_df['시간'].sum()
         total_days = 0
         
@@ -458,38 +457,41 @@ else:
                     
                     memo_data = target_df[target_df['과목'] == '메모']
                     memo_text = ", ".join(memo_data['사유'].tolist()) if not memo_data.empty else ""
+
+                    # 마음상태 데이터 추출
+                    mind_data = target_df[target_df['과목'] == '마음상태']
+                    mind_score = mind_data.iloc[-1]['사유'] if not mind_data.empty else ""
                     
-                    total_h = target_df[(target_df['과목'] != '인정결석') & (target_df['과목'] != '메모') & (target_df['과목'] != '설정')]['시간'].sum()
-                    daily_stats[d] = {'hours': total_h, 'is_absence': is_absence, 'reason': reason, 'memo': memo_text}
+                    total_h = target_df[(target_df['과목'] != '인정결석') & (target_df['과목'] != '메모') & (target_df['과목'] != '마음상태') & (target_df['과목'] != '설정')]['시간'].sum()
+                    daily_stats[d] = {'hours': total_h, 'is_absence': is_absence, 'reason': reason, 'memo': memo_text, 'mind_score': mind_score}
 
         html = "<style>"
-        html += ".cal-container { display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: 1fr; gap: 8px; margin-bottom: 20px; }"
+        html += ".cal-container { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 20px; }"
         html += ".cal-header { text-align: center; font-weight: bold; color: #555; padding: 5px 0; }"
         
-        # 기본 PC 화면에서의 캘린더 셀 CSS
         html += ".cal-cell { height: 110px; min-height: 0; padding: 6px; border-radius: 8px; border: 1px solid #ddd; display: flex; flex-direction: column; justify-content: space-between; color: #333; box-shadow: 1px 1px 3px rgba(0,0,0,0.05); transition: all 0.2s ease; overflow: hidden; }"
         html += ".cal-cell:hover { transform: translateY(-3px); box-shadow: 2px 4px 8px rgba(0,0,0,0.15); border-color: #999; cursor: pointer; }"
-        html += ".cal-top { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.1; width: 100%; overflow: hidden; }"
-        html += ".cal-bottom { display: flex; flex-direction: column; align-items: flex-end; width: 100%; overflow: hidden; }"
+        
+        html += ".cal-top { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.1; width: 100%; overflow: hidden; min-width: 0; }"
+        html += ".cal-bottom { display: flex; flex-direction: column; align-items: flex-end; width: 100%; overflow: hidden; min-width: 0; }"
+        
         html += ".cal-day-num { font-weight: bold; font-size: 1.1em; margin-bottom: 2px; }"
-        html += ".cal-holiday { font-size: 0.7em; color: #dc3545; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; display: block; }"
-        html += ".cal-memo { font-size: 0.75em; color: #495057; background: rgba(255,255,255,0.6); padding: 1px 4px; border-radius: 4px; border: 1px solid #dee2e6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; align-self: flex-start; margin-bottom: 2px; display: block; box-sizing: border-box; }"
-        html += ".cal-hours { font-size: 0.95em; font-weight: bold; white-space: nowrap; }"
-        html += ".cal-reason { font-size: 0.8em; color: #dc3545; font-weight: bold; line-height: 1.2; text-align: right; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }"
-        html += ".cal-reason-text { font-weight: normal; color: #555; font-size: 0.9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }"
+        html += ".cal-holiday { font-size: 0.7em; color: #dc3545; font-weight: bold; display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }"
+        html += ".cal-memo { font-size: 0.75em; color: #495057; background: rgba(255,255,255,0.6); padding: 1px 4px; border-radius: 4px; border: 1px solid #dee2e6; display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; box-sizing: border-box; }"
+        html += ".cal-hours { font-size: 0.95em; font-weight: bold; white-space: nowrap; display: block; }"
+        html += ".cal-reason { font-size: 0.8em; color: #dc3545; font-weight: bold; line-height: 1.2; text-align: right; display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }"
+        html += ".cal-reason-text { display: none; }" 
         html += ".cal-empty { background-color: transparent; border: none; box-shadow: none; }"
         
-        # 모바일 화면을 위한 미디어 쿼리 추가 (화면 너비 768px 이하일 때 적용)
         html += "@media (max-width: 768px) {"
-        html += ".cal-container { gap: 4px; grid-auto-rows: 1fr; }"
-        html += ".cal-header { font-size: 0.75em; padding: 2px 0; }"  
-        html += ".cal-cell { height: auto; min-height: 70px; aspect-ratio: 1 / 1.15; padding: 4px; overflow: hidden; }" 
-        html += ".cal-day-num { font-size: 0.85em; margin-bottom: 1px; }"
-        html += ".cal-hours { font-size: 0.75em; }"
-        html += ".cal-holiday { font-size: 0.55em; }"
-        html += ".cal-memo { font-size: 0.55em; padding: 1px; margin-bottom: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; display: block; box-sizing: border-box; }"
-        html += ".cal-reason { font-size: 0.65em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; display: block; }"
-        html += ".cal-reason-text { display: none; }" 
+        html += ".cal-container { gap: 2px; }" 
+        html += ".cal-header { font-size: 0.7em; padding: 2px 0; }" 
+        html += ".cal-cell { height: 80px; min-height: 80px; aspect-ratio: unset; padding: 3px; overflow: hidden; }" 
+        html += ".cal-day-num { font-size: 0.75em; margin-bottom: 0; }"
+        html += ".cal-hours { font-size: 0.7em; margin-top: auto; }"
+        html += ".cal-holiday { font-size: 0.55em; display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }"
+        html += ".cal-memo { font-size: 0.55em; padding: 1px 2px; margin-bottom: 1px; display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box; }"
+        html += ".cal-reason { font-size: 0.6em; text-align: right; display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }"
         html += "}"
         html += "</style><div class='cal-container'>"
         
@@ -514,6 +516,11 @@ else:
                     is_abs = stats['is_absence']
                     reason = stats['reason']
                     memo = stats['memo']
+                    mind_score = stats['mind_score']
+
+                    # 마음상태 점수에 따른 이모지 매핑
+                    mind_emoji = {"1": "😰", "2": "🙁", "3": "😌", "4": "😩", "5": "🤯"}.get(str(mind_score), "🧠")
+                    mind_html = f"<div class='cal-memo' style='background: #fff3cd; color: #856404;'>{mind_emoji} 상태: {mind_score}</div>" if mind_score else ""
 
                     stripe_css = ""
                     if d > today or d < first_d:
@@ -525,7 +532,7 @@ else:
                         opacity = "0.85"
                         stripe_css = "background-image: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.08) 10px, rgba(0,0,0,0.08) 20px);"
                         memo_html = f"<div class='cal-memo'>📝 {memo}</div>" if memo else ""
-                        bottom_content = f"{memo_html}<div class='cal-reason'>🚫 인정결석<div class='cal-reason-text'>{reason}</div></div>"
+                        bottom_content = f"{mind_html}{memo_html}<div class='cal-reason'>🚫 인정결석<div class='cal-reason-text'>{reason}</div></div>"
                     else:
                         opacity = "1"
                         if h >= n_hours: bg_color = color1
@@ -533,7 +540,7 @@ else:
                         else: bg_color = color3
                         
                         memo_html = f"<div class='cal-memo'>📝 {memo}</div>" if memo else ""
-                        bottom_content = f"{memo_html}<span class='cal-hours'>{h:.1f} h</span>"
+                        bottom_content = f"{mind_html}{memo_html}<span class='cal-hours'>{h:.1f} h</span>"
 
                     holiday_name_text = kr_holidays.get(d)
                     is_holiday = bool(holiday_name_text)
@@ -576,6 +583,7 @@ else:
                 r = df.loc[x]
                 if r['과목'] == '인정결석': return f"🚫 인정결석 ({r['사유']})"
                 elif r['과목'] == '메모': return f"📝 메모 ({r['사유']})"
+                elif r['과목'] == '마음상태': return f"🧠 마음상태 ({r['사유']}점)"
                 else: return f"{r['과목']} ({r['시간']}h)"
                 
             target_idx = st.selectbox("수정 또는 삭제할 기록을 선택하세요 (최신순)", target_idx_list, format_func=format_edit_item)
@@ -583,8 +591,9 @@ else:
             if target_idx is not None:
                 is_selected_abs = (df.loc[target_idx, '과목'] == '인정결석')
                 is_selected_memo = (df.loc[target_idx, '과목'] == '메모')
+                is_selected_mind = (df.loc[target_idx, '과목'] == '마음상태')
                 
-                if is_selected_abs or is_selected_memo:
+                if is_selected_abs or is_selected_memo or is_selected_mind:
                     new_reason = st.text_input("수정할 내용", value=df.loc[target_idx, '사유'])
                 else:
                     new_time = st.number_input("새로운 공부 시간 (h)", min_value=0.0, step=0.5, value=float(df.loc[target_idx, '시간']))
@@ -594,7 +603,7 @@ else:
                 with col_btn1:
                     if st.button("⏳ 수정 저장", use_container_width=True):
                         row_dict = df.loc[target_idx].to_dict()
-                        if is_selected_abs or is_selected_memo: 
+                        if is_selected_abs or is_selected_memo or is_selected_mind: 
                             row_dict['사유'] = new_reason
                         else:
                             if new_time > 0: row_dict['시간'] = new_time
@@ -610,7 +619,8 @@ else:
                         st.rerun()
 
         st.write("---")
-        col_form1, col_form2 = st.columns(2)
+        # 폼을 3열로 나누어 마음상태 입력칸 추가
+        col_form1, col_form2, col_form3 = st.columns(3)
         
         with col_form1:
             st.write(f"**📌 {selected_date} 메모 등록**")
@@ -635,6 +645,17 @@ else:
                         append_data({"날짜": selected_date, "과목": "인정결석", "시간": 0.0, "사유": absence_reason})
                         st.success(f"{selected_date}이(가) 인정결석으로 처리되었습니다.")
                         st.rerun()
+
+        with col_form3:
+            st.write(f"**📌 {selected_date} 마음상태 결산**")
+            with st.form("mind_form", clear_on_submit=True):
+                st.caption("1(불안함/공부부족) ~ 5(답답함/과부하)")
+                mind_val = st.slider("오늘의 마음 상태 지수", 1, 5, 3)
+                submit_mind = st.form_submit_button("상태 기록하기")
+                if submit_mind:
+                    append_data({"날짜": selected_date, "과목": "마음상태", "시간": 0.0, "사유": str(mind_val)})
+                    st.success("마음상태가 안전하게 기록되었습니다.")
+                    st.rerun()
 
     elif selected_tab == "⚙️ 설정":
         st.subheader("⚙️ 대시보드 및 캘린더 설정")
