@@ -39,7 +39,7 @@ def get_data():
     except Exception:
         return pd.DataFrame(columns=['날짜', '과목', '시간'])
 
-# 데이터 업데이트 함수 (권한 에러 예외 처리 추가 및 gspread 문법 오류 수정)
+# 데이터 업데이트 함수 
 def update_data(updated_df):
     try:
         ws.clear()
@@ -47,7 +47,6 @@ def update_data(updated_df):
         save_df['날짜'] = save_df['날짜'].astype(str)
         # 데이터 리스트 변환 후 저장
         data = [save_df.columns.values.tolist()] + save_df.values.tolist()
-        # gspread 최신 버전 요구사항에 맞춰 시작 범위('A1') 명시
         ws.update(range_name='A1', values=data)
     except gspread.exceptions.APIError as e:
         st.error(f"구글 시트 쓰기(편집) 권한이 없습니다. 서비스 계정 이메일이 시트의 '편집자'로 등록되어 있는지 확인하세요. 상세 오류: {e}")
@@ -106,14 +105,51 @@ else:
     tab1, tab2, tab3 = st.tabs(["📊 요약 및 추이", "📅 요일별 집중 분석", "🗓️ 날짜별 상세 관리"])
 
     with tab1:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("총 시간", f"{df['시간'].sum():.1f}h")
-        c2.metric("기록 일수", f"{df['날짜'].nunique()}일")
-        c3.metric("일평균", f"{(df['시간'].sum()/df['날짜'].nunique()):.1f}h")
+        st.subheader("📊 기간별 학습 요약 및 달성도")
+        
+        # 주간/월간 필터 추가
+        filter_opt = st.radio("조회 기간 선택", ["전체 기간", "최근 7일 (주간)", "최근 30일 (월간)"], horizontal=True)
+        
+        filtered_df = df.copy()
+        now = pd.Timestamp.now().normalize()
+        
+        if filter_opt == "최근 7일 (주간)":
+            filtered_df = filtered_df[filtered_df['날짜'] >= (now - pd.Timedelta(days=6))]
+        elif filter_opt == "최근 30일 (월간)":
+            filtered_df = filtered_df[filtered_df['날짜'] >= (now - pd.Timedelta(days=29))]
 
-        line_df = df.groupby('날짜', as_index=False)['시간'].sum()
-        fig_line = px.line(line_df, x='날짜', y='시간', title="학습 시간 변화 추이", markers=True)
-        st.plotly_chart(fig_line, use_container_width=True)
+        if filtered_df.empty:
+            st.warning("선택한 기간에 기록된 학습 데이터가 없습니다.")
+        else:
+            # 상단 지표
+            c1, c2, c3 = st.columns(3)
+            c1.metric("총 공부 시간", f"{filtered_df['시간'].sum():.1f}h")
+            c2.metric("기록 일수", f"{filtered_df['날짜'].nunique()}일")
+            c3.metric("일평균", f"{(filtered_df['시간'].sum()/filtered_df['날짜'].nunique()):.1f}h")
+            
+            st.divider()
+            
+            # 신규 기능: 과목 밸런스(도넛 차트) & 누적 시간(영역 그래프)
+            col_chart1, col_chart2 = st.columns(2)
+            
+            with col_chart1:
+                # 1. 과목별 비중 도넛 차트
+                sub_sum = filtered_df.groupby('과목', as_index=False)['시간'].sum()
+                fig_donut = px.pie(sub_sum, values='시간', names='과목', title=f"🎯 {filter_opt} 과목별 학습 밸런스", hole=0.4)
+                st.plotly_chart(fig_donut, use_container_width=True)
+
+            with col_chart2:
+                # 2. 누적 성취도 선 그래프
+                daily_sum = filtered_df.groupby('날짜', as_index=False)['시간'].sum().sort_values('날짜')
+                daily_sum['누적시간'] = daily_sum['시간'].cumsum()
+                fig_cum = px.area(daily_sum, x='날짜', y='누적시간', title=f"📈 {filter_opt} 누적 학습 성취도", markers=True)
+                # 그래프 색상 채우기 변경 (초록색 톤)
+                fig_cum.update_traces(line_color='#2ca02c', fillcolor='rgba(44, 160, 44, 0.2)')
+                st.plotly_chart(fig_cum, use_container_width=True)
+            
+            # 하단: 일자별 변동 그래프 (기존 기능 유지)
+            fig_daily = px.bar(daily_sum, x='날짜', y='시간', title=f"📅 {filter_opt} 일자별 공부 시간", text_auto=True)
+            st.plotly_chart(fig_daily, use_container_width=True)
 
     with tab2:
         st.subheader("요일별 학습 패턴")
