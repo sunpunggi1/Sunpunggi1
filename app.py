@@ -225,6 +225,11 @@ else:
     # 데이터 분류 (마음상태 추가 제외)
     study_df = df[(df['과목'] != '인정결석') & (df['과목'] != '메모') & (df['과목'] != '마음상태') & (df['과목'] != '설정')]
     absence_df = df[df['과목'] == '인정결석']
+    
+    # 마음상태 데이터 전처리
+    mind_df = df[df['과목'] == '마음상태'].copy()
+    mind_df['마음지수'] = pd.to_numeric(mind_df['사유'], errors='coerce')
+    mind_df['연월'] = mind_df['날짜'].dt.strftime('%Y-%m')
 
     active_dates_A = set(df[((df['시간'] > 0) | (df['과목'] == '인정결석')) & (df['과목'] != '설정')]['날짜_date'])
     active_dates_B = set(df[(df['시간'] > 0) & (df['과목'] != '설정') & (df['과목'] != '인정결석') & (df['과목'] != '메모') & (df['과목'] != '마음상태')]['날짜_date'])
@@ -341,6 +346,29 @@ else:
             fig_daily = px.bar(daily_sum, x='날짜', y='시간', title=f"📅 {filter_opt} 일자별 공부 시간", text_auto=True)
             st.plotly_chart(fig_daily, use_container_width=True)
 
+        # --- 신규: 월별 마음상태 추이 그래프 ---
+        st.divider()
+        st.subheader("🧠 월별 마음상태 추이")
+        st.caption("1점(불안함) ↔ 5점(평온) ↔ 9점(과부하)")
+        if not mind_df.empty:
+            monthly_mind = mind_df.groupby('연월', as_index=False)['마음지수'].mean().sort_values('연월')
+            fig_mind_m = px.line(monthly_mind, x='연월', y='마음지수', markers=True, title="📅 월별 평균 마음상태 흐름")
+            fig_mind_m.update_traces(line_color='#8A2BE2', marker=dict(size=8))
+            fig_mind_m.update_yaxes(range=[1, 9], dtick=1)
+            fig_mind_m.add_hline(y=5, line_dash="dash", line_color="#2ca02c", annotation_text="평온 (5)", annotation_position="bottom right")
+            st.plotly_chart(fig_mind_m, use_container_width=True)
+            
+            recent_month = monthly_mind.iloc[-1]
+            recent_score = recent_month['마음지수']
+            if recent_score >= 7:
+                st.warning(f"💡 가장 최근인 {recent_month['연월']}월은 평균 **{recent_score:.1f}점**으로 과부하에 가까운 상태입니다. 적절한 휴식과 재충전이 필요해 보입니다.")
+            elif recent_score <= 3:
+                st.warning(f"💡 가장 최근인 {recent_month['연월']}월은 평균 **{recent_score:.1f}점**으로 불안함이 높은 상태입니다. 실현 가능한 작은 목표부터 다시 시작해보세요.")
+            else:
+                st.success(f"💡 가장 최근인 {recent_month['연월']}월은 평균 **{recent_score:.1f}점**으로 안정적이고 평온한 상태를 유지하고 있습니다.")
+        else:
+            st.info("기록된 마음상태 데이터가 없습니다.")
+
     elif selected_tab == "📅 요일별 집중 분석":
         col_title, col_check = st.columns([3, 1])
         with col_title:
@@ -431,6 +459,35 @@ else:
                     st.write(f"{sel_day}요일에 학습한 데이터가 아직 없습니다.")
             else:
                 st.write("선택할 수 있는 요일이 없습니다.")
+
+        # --- 신규: 요일별 마음상태 패턴 분석 그래프 ---
+        st.divider()
+        st.subheader("🧠 요일별 마음상태 패턴 분석")
+        st.caption("특정 요일에 유독 기분이 답답한지, 평온한지, 불안한지 확인해보세요.")
+        
+        target_mind_df = mind_df.copy()
+        if exclude_red_days or exclude_saturdays:
+            target_mind_df = target_mind_df[~target_mind_df['날짜_date'].apply(is_excluded)]
+            
+        if not target_mind_df.empty:
+            weekly_mind = target_mind_df.groupby('요일', observed=True)['마음지수'].mean().dropna().reset_index()
+            if not weekly_mind.empty:
+                fig_mind_w = px.bar(weekly_mind, x='요일', y='마음지수', color='요일', title="📅 요일별 평균 마음상태 지수", color_discrete_map=rainbow_colors)
+                fig_mind_w.update_yaxes(range=[0, 9], dtick=1)
+                fig_mind_w.add_hline(y=5, line_dash="dash", line_color="#2ca02c", annotation_text="평온 (5)")
+                st.plotly_chart(fig_mind_w, use_container_width=True)
+                
+                max_mind_day = weekly_mind.loc[weekly_mind['마음지수'].idxmax(), '요일']
+                max_mind_score = weekly_mind['마음지수'].max()
+                min_mind_day = weekly_mind.loc[weekly_mind['마음지수'].idxmin(), '요일']
+                min_mind_score = weekly_mind['마음지수'].min()
+                
+                st.write(f"- 📈 **가장 과부하/답답함**을 느끼는 요일: **{max_mind_day}요일** (평균 {max_mind_score:.1f}점)")
+                st.write(f"- 📉 **가장 불안함**을 느끼는 요일: **{min_mind_day}요일** (평균 {min_mind_score:.1f}점)")
+            else:
+                 st.info("해당 조건에 기록된 마음상태 데이터가 없습니다.")
+        else:
+            st.info("해당 조건에 기록된 마음상태 데이터가 없습니다.")
 
     elif selected_tab == "🗓️ 학습 캘린더 및 관리":
         st.subheader("🗓️ 학습 캘린더 및 상세 관리")
