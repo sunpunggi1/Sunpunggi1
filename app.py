@@ -9,7 +9,7 @@ import calendar
 st.set_page_config(page_title="최현규의 열공 대시보드", layout="wide")
 st.title("🚀 최현규의 데이터 기반 학습 시스템")
 
-# --- 신규: 탭 상태 및 달력 파라미터 보존 로직 ---
+# --- 탭 상태 및 달력 파라미터 보존 로직 ---
 today = pd.Timestamp.now().date()
 if 'selected_date' not in st.session_state:
     st.session_state['selected_date'] = today
@@ -26,11 +26,10 @@ if 'cal_c2' not in st.session_state:
 if 'cal_c3' not in st.session_state:
     st.session_state['cal_c3'] = "#F8D7DA"
 
-# 탭 메뉴 초기화
 if 'active_tab' not in st.session_state:
     st.session_state['active_tab'] = "📊 요약 및 추이"
 
-# 달력 클릭 시 URL 파라미터 감지 및 상태 강제 업데이트 (1회만 실행되도록 캐싱)
+# 달력 클릭 시 URL 파라미터 감지 및 상태 강제 업데이트
 if "date" in st.query_params:
     clicked_date_str = st.query_params["date"]
     if st.session_state.get('last_processed_date') != clicked_date_str:
@@ -38,7 +37,7 @@ if "date" in st.query_params:
             clicked_date = pd.to_datetime(clicked_date_str).date()
             st.session_state['selected_date'] = clicked_date
             st.session_state['cal_view_date'] = pd.to_datetime(clicked_date).replace(day=1).date()
-            st.session_state['active_tab'] = "🗓️ 학습 캘린더 및 관리"  # 캘린더 탭으로 고정
+            st.session_state['active_tab'] = "🗓️ 학습 캘린더 및 관리" 
             
             if "goal" in st.query_params: st.session_state['cal_goal'] = float(st.query_params["goal"])
             if "c1" in st.query_params: st.session_state['cal_c1'] = f"#{st.query_params['c1']}"
@@ -86,21 +85,37 @@ def update_data(updated_df):
     try:
         ws.clear()
         save_df = updated_df.copy()
-        save_df['날짜'] = save_df['날짜'].astype(str)
+        # 저장 전 모든 날짜를 완벽한 문자열 포맷으로 고정하여 오염 방지
+        save_df['날짜'] = pd.to_datetime(save_df['날짜']).dt.strftime('%Y-%m-%d')
         save_df['사유'] = save_df['사유'].astype(str)
+        
+        # 보조용으로 추가된 열이 있다면 제거하고 저장
+        cols_to_drop = ['날짜_date', '요일']
+        save_df = save_df.drop(columns=[c for c in cols_to_drop if c in save_df.columns])
+        
         data = [save_df.columns.values.tolist()] + save_df.values.tolist()
         ws.update(range_name='A1', values=data)
     except gspread.exceptions.APIError as e:
-        st.error(f"구글 시트 쓰기(편집) 권한이 없습니다. 서비스 계정 이메일이 시트의 '편집자'로 등록되어 있는지 확인하세요. 상세 오류: {e}")
+        st.error(f"구글 시트 쓰기 권한이 없습니다. 서비스 계정 이메일이 시트의 '편집자'인지 확인하세요.")
         st.stop()
     except Exception as e:
-        st.error(f"데이터 업데이트 중 알 수 없는 오류가 발생했습니다: {e}")
+        st.error(f"데이터 업데이트 중 오류 발생: {e}")
         st.stop()
 
+# --- 핵심 수정: 데이터를 불러오자마자 전역으로 날짜 변환 및 정리 ---
 df = get_data()
 
-if df.empty or '날짜' not in df.columns:
-    df = pd.DataFrame(columns=['날짜', '과목', '시간', '사유'])
+if not df.empty and '날짜' in df.columns:
+    df['날짜'] = pd.to_datetime(df['날짜'].astype(str).str.strip(), errors='coerce')
+    df = df.dropna(subset=['날짜']).copy()
+    df['날짜_date'] = df['날짜'].dt.date
+    
+    days_map = {0:'월', 1:'화', 2:'수', 3:'목', 4:'금', 5:'토', 6:'일'}
+    df['요일'] = df['날짜'].dt.dayofweek.map(days_map)
+    day_order = ['월', '화', '수', '목', '금', '토', '일']
+    df['요일'] = pd.Categorical(df['요일'], categories=day_order, ordered=True)
+else:
+    df = pd.DataFrame(columns=['날짜', '과목', '시간', '사유', '날짜_date', '요일'])
 
 # 3. 사이드바: 데이터 입력 및 관리
 with st.sidebar:
@@ -110,14 +125,14 @@ with st.sidebar:
 
     st.header("📝 학습 기록")
     with st.form("input_form", clear_on_submit=True):
-        date = st.date_input("날짜", value=st.session_state['selected_date'])
+        date_input = st.date_input("날짜", value=st.session_state['selected_date'])
         subject = st.selectbox("과목", ["국어", "수학", "영어", "사회문화", "지구과학I", "한국사"])
         time = st.number_input("시간 (h)", min_value=0.0, step=0.5, value=0.0)
         submit = st.form_submit_button("구글 시트에 저장")
         
         if submit:
             if time > 0:
-                new_row = pd.DataFrame([{"날짜": str(date), "과목": subject, "시간": time, "사유": ""}])
+                new_row = pd.DataFrame([{"날짜": pd.to_datetime(date_input), "과목": subject, "시간": time, "사유": ""}])
                 updated_df = pd.concat([df, new_row], ignore_index=True)
                 update_data(updated_df)
                 st.success("기록 완료!")
@@ -131,9 +146,10 @@ with st.sidebar:
         reversed_idx = list(reversed(df.index))
         def format_delete_item(x):
             row = df.loc[x]
+            date_str = row['날짜'].strftime('%Y-%m-%d')
             if row['과목'] == '인정결석':
-                return f"[{x}] {row['날짜']} - 🚫 인정결석 ({row['사유']})"
-            return f"[{x}] {row['날짜']} - {row['과목']} ({row['시간']}h)"
+                return f"[{x}] {date_str} - 🚫 인정결석 ({row['사유']})"
+            return f"[{x}] {date_str} - {row['과목']} ({row['시간']}h)"
             
         delete_idx = st.selectbox("빠른 삭제할 기록을 선택하세요 (최신순)", reversed_idx, format_func=format_delete_item)
         if st.button("선택한 기록 삭제", type="primary"):
@@ -146,19 +162,10 @@ with st.sidebar:
 if df.empty:
     st.info("데이터가 없습니다. 왼쪽 사이드바에서 첫 공부 기록을 시작해보세요!")
 else:
-    # 데이터 전처리 및 오염 방지
-    df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
-    df = df.dropna(subset=['날짜']).copy()
-    
-    days_map = {0:'월', 1:'화', 2:'수', 3:'목', 4:'금', 5:'토', 6:'일'}
-    df['요일'] = df['날짜'].dt.dayofweek.map(days_map)
-    day_order = ['월', '화', '수', '목', '금', '토', '일']
-    df['요일'] = pd.Categorical(df['요일'], categories=day_order, ordered=True)
-
     study_df = df[df['과목'] != '인정결석']
     absence_df = df[df['과목'] == '인정결석']
 
-    active_dates = set(df[(df['시간'] > 0) | (df['과목'] == '인정결석')]['날짜'].dt.date)
+    active_dates = set(df[(df['시간'] > 0) | (df['과목'] == '인정결석')]['날짜_date'])
     active_dates_desc = sorted(list(active_dates), reverse=True)
     
     streak_count = 0
@@ -194,10 +201,7 @@ else:
     this_week_df = study_df[study_df['날짜'] >= start_of_week]
     this_week_hours = this_week_df['시간'].sum()
 
-    # --- 탭을 라디오 버튼 메뉴로 교체 (상태 유지용) ---
     tabs = ["📊 요약 및 추이", "📅 요일별 집중 분석", "🗓️ 학습 캘린더 및 관리"]
-    
-    # st.radio를 가로로 배치하여 탭처럼 보이게 만듦
     selected_tab = st.radio("메뉴 이동", tabs, horizontal=True, label_visibility="collapsed", key="active_tab")
     st.write("---")
 
@@ -206,7 +210,7 @@ else:
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("총 공부 시간", f"{study_df['시간'].sum():.1f}h")
         c2.metric("🔥 연속 활동일", f"{streak_count}일")
-        c3.metric("순수 학습일", f"{study_df[study_df['시간']>0]['날짜'].nunique()}일")
+        c3.metric("순수 학습일", f"{study_df[study_df['시간']>0]['날짜_date'].nunique()}일")
         c4.metric("총 쉰 날", f"{total_rest_days}일")
         c5.metric("최장 휴식기", f"{max_break}일")
         
@@ -261,7 +265,7 @@ else:
         avg_method = st.radio("📊 평균 계산 기준", ["공부한 날만 포함", "쉬었던 날 포함(인정결석 제외)", "쉬었던 날(0시간) 포함"], horizontal=True)
         
         col_left, col_right = st.columns(2)
-        daily_sum_df = study_df.groupby(['날짜', '요일'], observed=True)['시간'].sum().reset_index()
+        daily_sum_df = study_df.groupby(['날짜_date', '요일'], observed=True)['시간'].sum().reset_index()
         
         if avg_method == "공부한 날만 포함":
             week_avg = daily_sum_df[daily_sum_df['시간'] > 0].groupby('요일', observed=True)['시간'].mean().reset_index()
@@ -269,18 +273,18 @@ else:
             if active_dates_desc:
                 first_d = sorted(list(active_dates))[0]
                 full_dates = pd.date_range(start=first_d, end=today)
-                full_df = pd.DataFrame({'날짜': full_dates})
-                full_df['요일'] = full_df['날짜'].dt.dayofweek.map(days_map)
-                full_df['요일'] = pd.Categorical(full_df['요일'], categories=day_order, ordered=True)
+                full_df = pd.DataFrame({'날짜_date': full_dates.date})
+                full_df['요일'] = full_dates.dayofweek.map({0:'월', 1:'화', 2:'수', 3:'목', 4:'금', 5:'토', 6:'일'})
+                full_df['요일'] = pd.Categorical(full_df['요일'], categories=['월', '화', '수', '목', '금', '토', '일'], ordered=True)
                 
-                absence_date_list = absence_df['날짜'].dt.date.unique()
+                absence_date_list = absence_df['날짜_date'].unique()
                 if avg_method == "쉬었던 날 포함(인정결석 제외)":
-                    full_df = full_df[~full_df['날짜'].dt.date.isin(absence_date_list)]
+                    full_df = full_df[~full_df['날짜_date'].isin(absence_date_list)]
                 
-                merged_df = pd.merge(full_df, daily_sum_df[['날짜', '시간']], on='날짜', how='left').fillna({'시간': 0})
+                merged_df = pd.merge(full_df, daily_sum_df[['날짜_date', '시간']], on='날짜_date', how='left').fillna({'시간': 0})
                 week_avg = merged_df.groupby('요일', observed=True)['시간'].mean().reset_index()
             else:
-                week_avg = pd.DataFrame({'요일': day_order, '시간': [0]*7})
+                week_avg = pd.DataFrame({'요일': ['월', '화', '수', '목', '금', '토', '일'], '시간': [0]*7})
         
         with col_left:
             fig_week = px.bar(week_avg, x='요일', y='시간', color='요일', title="요일별 평균 공부 시간")
@@ -294,7 +298,7 @@ else:
                 st.warning(f"💡 데이터 객관화: **{min_day}요일**에는 유독 학습 시간이 짧아지는 패턴이 있습니다.")
             
             st.divider()
-            sel_day = st.radio("분석할 요일", day_order, horizontal=True)
+            sel_day = st.radio("분석할 요일", ['월', '화', '수', '목', '금', '토', '일'], horizontal=True)
             day_df = study_df[study_df['요일'] == sel_day]
             if not day_df.empty:
                 fig_pie = px.pie(day_df, values='시간', names='과목', title=f"{sel_day}요일 과목 비중", hole=.4)
@@ -320,7 +324,6 @@ else:
                 color3 = st.color_picker("공부 안 한 날 (0h)", st.session_state['cal_c3'])
                 st.session_state['cal_c3'] = color3
 
-        # --- 화살표 기반 월 이동 컨트롤 ---
         curr_view_dt = pd.to_datetime(st.session_state['cal_view_date'])
         
         col_btn_l, col_text, col_btn_r = st.columns([1, 4, 1])
@@ -338,14 +341,15 @@ else:
         cal_year = st.session_state['cal_view_date'].year
         cal_month = st.session_state['cal_view_date'].month
 
-        cal = calendar.Calendar(firstweekday=0)
+        # --- 핵심 수정: 한 주의 시작을 일요일(6)로 변경 ---
+        cal = calendar.Calendar(firstweekday=6)
         month_days = cal.monthdatescalendar(cal_year, cal_month)
         
         daily_stats = {}
         for week in month_days:
             for d in week:
                 if d.month == cal_month:
-                    target_df = df[df['날짜'].dt.date == d]
+                    target_df = df[df['날짜_date'] == d]
                     abs_data = target_df[target_df['과목'] == '인정결석']
                     is_absence = not abs_data.empty
                     reason = abs_data.iloc[0]['사유'] if is_absence else ""
@@ -359,12 +363,15 @@ else:
         html += ".cal-cell:hover { transform: translateY(-3px); box-shadow: 2px 4px 8px rgba(0,0,0,0.15); border-color: #999; cursor: pointer; }"
         html += ".cal-day-num { font-weight: bold; font-size: 1.1em; margin-bottom: 5px; }"
         html += ".cal-hours { font-size: 0.95em; align-self: flex-end; font-weight: bold; }"
-        html += ".cal-reason { font-size: 0.85em; color: #555; font-weight: bold; line-height: 1.2; margin-top: 5px; }"
+        html += ".cal-reason { font-size: 0.85em; color: #dc3545; font-weight: bold; line-height: 1.2; margin-top: 5px; }"
         html += ".cal-empty { background-color: transparent; border: none; box-shadow: none; }"
         html += "</style><div class='cal-container'>"
         
-        for day_name in ["월", "화", "수", "목", "금", "토", "일"]:
-            html += f"<div class='cal-header'>{day_name}</div>"
+        # 헤더 순서 일요일부터 시작하도록 변경
+        for day_name in ["일", "월", "화", "수", "목", "금", "토"]:
+            # 일요일, 토요일 색상 구별 추가
+            color_style = "color: #dc3545;" if day_name == "일" else ("color: #007bff;" if day_name == "토" else "")
+            html += f"<div class='cal-header' style='{color_style}'>{day_name}</div>"
 
         first_d = sorted(list(active_dates))[0] if active_dates else today
         
@@ -389,11 +396,11 @@ else:
                         opacity = "0.6"
                         text = ""
                     elif is_abs:
-                        # 인정결석 시각화 보강: 회색조 및 빗금(스트라이프) 패턴 삽입
-                        bg_color = "#f8f9fa"
-                        opacity = "0.8"
-                        stripe_css = "background-image: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.05) 10px, rgba(0,0,0,0.05) 20px);"
-                        text = f"<span class='cal-reason'>🚫 인정결석<br><span style='font-weight: normal;'>{reason}</span></span>"
+                        # 인정결석 시각화 개선: 더 어둡게, 빗금 촘촘하게, 텍스트 눈에 띄게
+                        bg_color = "#e9ecef"
+                        opacity = "0.85"
+                        stripe_css = "background-image: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.08) 10px, rgba(0,0,0,0.08) 20px);"
+                        text = f"<span class='cal-reason'>🚫 인정결석<br><span style='font-weight: normal; color: #555;'>{reason}</span></span>"
                     else:
                         opacity = "1"
                         if h >= n_hours:
@@ -422,7 +429,7 @@ else:
         )
         st.session_state['selected_date'] = selected_date
         
-        target_df = df[df['날짜'].dt.date == selected_date]
+        target_df = df[df['날짜_date'] == selected_date]
         
         if target_df.empty:
             st.info(f"{selected_date}에 기록된 공부 데이터가 없습니다.")
@@ -463,16 +470,14 @@ else:
                         else:
                             updated_df.loc[target_idx, '사유'] = new_reason
                             
-                        save_df = updated_df.drop(columns=['요일'], errors='ignore')
-                        update_data(save_df)
+                        update_data(updated_df)
                         st.success("성공적으로 수정되었습니다.")
                         st.rerun()
                 
                 with col_btn2:
                     if st.button("🗑️ 이 기록 완전히 삭제", use_container_width=True, type="primary"):
                         updated_df = df.drop(target_idx).reset_index(drop=True)
-                        save_df = updated_df.drop(columns=['요일'], errors='ignore')
-                        update_data(save_df)
+                        update_data(updated_df)
                         st.warning("기록이 삭제되었습니다.")
                         st.rerun()
 
@@ -486,12 +491,13 @@ else:
                 if absence_reason.strip() == "":
                     st.warning("사유를 반드시 입력해주세요.")
                 else:
-                    new_abs_row = pd.DataFrame([{"날짜": str(selected_date), "과목": "인정결석", "시간": 0.0, "사유": absence_reason}])
+                    new_abs_row = pd.DataFrame([{"날짜": pd.to_datetime(selected_date), "과목": "인정결석", "시간": 0.0, "사유": absence_reason}])
                     updated_df = pd.concat([df, new_abs_row], ignore_index=True)
-                    save_df = updated_df.drop(columns=['요일'], errors='ignore')
-                    update_data(save_df)
+                    update_data(updated_df)
                     st.success(f"{selected_date}이(가) 인정결석으로 처리되었습니다.")
                     st.rerun()
 
     with st.expander("📄 전체 데이터 테이블 확인"):
-        st.write(df.sort_values('날짜', ascending=False))
+        # 불필요한 보조 열 숨기고 출력
+        display_df = df.drop(columns=['날짜_date', '요일'], errors='ignore')
+        st.write(display_df.sort_values('날짜', ascending=False))
