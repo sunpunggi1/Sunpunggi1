@@ -187,7 +187,6 @@ with st.sidebar:
             else:
                 st.warning("0시간 이상 입력해주세요.")
 
-    # --- 신규 반영: 마음상태 결산 위치 변경 및 범위 확장(1~9) ---
     st.divider()
     st.header("🧠 마음상태 결산")
     with st.form("mind_form", clear_on_submit=True):
@@ -481,7 +480,8 @@ else:
         html += ".cal-container { display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: 1fr; gap: 8px; margin-bottom: 20px; }"
         html += ".cal-header { text-align: center; font-weight: bold; color: #555; padding: 5px 0; }"
         
-        html += ".cal-cell { height: 110px; min-height: 0; padding: 6px; border-radius: 8px; border: 1px solid #ddd; display: flex; flex-direction: column; justify-content: space-between; color: #333; box-shadow: 1px 1px 3px rgba(0,0,0,0.05); transition: all 0.2s ease; overflow: hidden; }"
+        # .cal-cell에 position: relative; 추가
+        html += ".cal-cell { position: relative; height: 110px; min-height: 0; padding: 6px; border-radius: 8px; border: 1px solid #ddd; display: flex; flex-direction: column; justify-content: space-between; color: #333; box-shadow: 1px 1px 3px rgba(0,0,0,0.05); transition: all 0.2s ease; overflow: hidden; }"
         html += ".cal-cell:hover { transform: translateY(-3px); box-shadow: 2px 4px 8px rgba(0,0,0,0.15); border-color: #999; cursor: pointer; }"
         
         html += ".cal-top { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.1; width: 100%; overflow: hidden; min-width: 0; }"
@@ -490,6 +490,10 @@ else:
         html += ".cal-day-num { font-weight: bold; font-size: 1.1em; margin-bottom: 2px; }"
         html += ".cal-holiday { font-size: 0.7em; color: #dc3545; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; display: block; }"
         html += ".cal-memo { font-size: 0.75em; color: #495057; background: rgba(255,255,255,0.6); padding: 1px 4px; border-radius: 4px; border: 1px solid #dee2e6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; align-self: flex-start; margin-bottom: 2px; display: block; box-sizing: border-box; }"
+        
+        # 마음상태(mind) 항목 우측 상단 절대 배치 설정
+        html += ".cal-mind { position: absolute; top: 6px; right: 6px; font-size: 0.8em; color: #856404; background: rgba(255,243,205,0.9); padding: 1px 4px; border-radius: 4px; font-weight: bold; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }"
+
         html += ".cal-hours { font-size: 0.95em; font-weight: bold; white-space: nowrap; }"
         html += ".cal-reason { font-size: 0.8em; color: #dc3545; font-weight: bold; line-height: 1.2; text-align: right; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }"
         html += ".cal-reason-text { font-weight: normal; color: #555; font-size: 0.9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }"
@@ -503,6 +507,10 @@ else:
         html += ".cal-hours { font-size: 0.75em; }"
         html += ".cal-holiday { font-size: 0.55em; }"
         html += ".cal-memo { font-size: 0.55em; padding: 1px; margin-bottom: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; display: block; box-sizing: border-box; }"
+        
+        # 모바일용 마음상태 설정
+        html += ".cal-mind { font-size: 0.6em; top: 3px; right: 3px; padding: 1px 3px; }"
+        
         html += ".cal-reason { font-size: 0.65em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; display: block; }"
         html += ".cal-reason-text { display: none; }" 
         html += "}"
@@ -531,13 +539,14 @@ else:
                     memo = stats['memo']
                     mind_score = stats['mind_score']
 
-                    # 업데이트된 마음상태 이모지 매핑 (1~9)
                     mind_emoji_map = {
                         "1": "😭", "2": "😰", "3": "🙁", "4": "😐", "5": "😌", 
                         "6": "😅", "7": "😩", "8": "😵‍💫", "9": "🤯"
                     }
                     mind_emoji = mind_emoji_map.get(str(mind_score), "🧠")
-                    mind_html = f"<div class='cal-memo' style='background: #fff3cd; color: #856404;'>{mind_emoji} 상태: {mind_score}</div>" if mind_score else ""
+                    
+                    # 마음상태 HTML 코드를 cal-mind 클래스로 변경 및 텍스트 간소화
+                    mind_html = f"<div class='cal-mind'>{mind_emoji} {mind_score}</div>" if mind_score else ""
 
                     stripe_css = ""
                     if d > today or d < first_d:
@@ -549,7 +558,8 @@ else:
                         opacity = "0.85"
                         stripe_css = "background-image: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.08) 10px, rgba(0,0,0,0.08) 20px);"
                         memo_html = f"<div class='cal-memo'>📝 {memo}</div>" if memo else ""
-                        bottom_content = f"{mind_html}{memo_html}<div class='cal-reason'>🚫 인정결석<div class='cal-reason-text'>{reason}</div></div>"
+                        # bottom_content에서 마음상태 제외
+                        bottom_content = f"{memo_html}<div class='cal-reason'>🚫 인정결석<div class='cal-reason-text'>{reason}</div></div>"
                     else:
                         opacity = "1"
                         if h >= n_hours: bg_color = color1
@@ -557,7 +567,8 @@ else:
                         else: bg_color = color3
                         
                         memo_html = f"<div class='cal-memo'>📝 {memo}</div>" if memo else ""
-                        bottom_content = f"{mind_html}{memo_html}<span class='cal-hours'>{h:.1f} h</span>"
+                        # bottom_content에서 마음상태 제외
+                        bottom_content = f"{memo_html}<span class='cal-hours'>{h:.1f} h</span>"
 
                     holiday_name_text = kr_holidays.get(d)
                     is_holiday = bool(holiday_name_text)
@@ -573,6 +584,9 @@ else:
                     href = f"?date={d}"
                     html += f"<a href='{href}' target='_self' style='text-decoration: none; color: inherit;'>"
                     html += f"<div class='cal-cell' style='background-color: {bg_color}; opacity: {opacity}; {stripe_css}'>"
+                    
+                    # 마음상태 지표를 상단 우측에 독립적으로 삽입
+                    html += mind_html 
                     html += f"<div class='cal-top'><span class='cal-day-num' style='color: {day_color};'>{d.day}</span>{holiday_html}</div>"
                     html += f"<div class='cal-bottom'>{bottom_content}</div>"
                     html += "</div></a>"
