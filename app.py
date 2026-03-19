@@ -47,26 +47,50 @@ def get_data():
     except Exception:
         return pd.DataFrame(columns=['날짜', '과목', '시간', '사유'])
 
-def update_data(updated_df):
+# --- 신규: 최적화된 CRUD 함수 분리 ---
+def _format_row(row_dict):
+    date_val = row_dict.get('날짜', '')
+    if hasattr(date_val, 'strftime'): date_val = date_val.strftime('%Y-%m-%d')
+    else: date_val = str(date_val)
+    return [
+        date_val,
+        str(row_dict.get('과목', '')),
+        float(row_dict.get('시간', 0.0)),
+        str(row_dict.get('사유', ''))
+    ]
+
+def append_data(row_dict):
+    """새로운 행을 시트 맨 아래에 추가합니다."""
     try:
-        ws.clear()
-        save_df = updated_df.copy()
-        save_df['날짜'] = pd.to_datetime(save_df['날짜']).dt.strftime('%Y-%m-%d')
-        save_df['사유'] = save_df['사유'].astype(str)
-        cols_to_drop = ['날짜_date', '요일']
-        save_df = save_df.drop(columns=[c for c in cols_to_drop if c in save_df.columns])
-        
-        data = [save_df.columns.values.tolist()] + save_df.values.tolist()
-        ws.update(range_name='A1', values=data)
+        row_values = _format_row(row_dict)
+        ws.append_row(row_values)
     except Exception as e:
-        st.error(f"데이터 업데이트 중 오류 발생: {e}")
+        st.error(f"데이터 추가 중 오류 발생: {e}")
+        st.stop()
+
+def edit_data(df_index, row_dict):
+    """DataFrame 인덱스를 통해 시트의 특정 행 번호를 찾아 업데이트합니다."""
+    try:
+        sheet_row = df_index + 2 # 구글 시트는 1행이 헤더이므로 인덱스값에 +2를 해야 실제 행이 됨
+        row_values = [_format_row(row_dict)]
+        ws.update(range_name=f'A{sheet_row}:D{sheet_row}', values=row_values)
+    except Exception as e:
+        st.error(f"데이터 수정 중 오류 발생: {e}")
+        st.stop()
+
+def delete_data(df_index):
+    """DataFrame 인덱스를 통해 시트의 특정 행 번호를 찾아 삭제합니다."""
+    try:
+        sheet_row = df_index + 2
+        ws.delete_rows(sheet_row)
+    except Exception as e:
+        st.error(f"데이터 삭제 중 오류 발생: {e}")
         st.stop()
 
 # 데이터 로드 및 전처리
 df = get_data()
 
 # --- 설정 데이터(물리적 저장) 불러오기 ---
-# 기본 설정값
 default_settings = {
     'cal_goal': 3.0, 'cal_c1': "#D4EDDA", 'cal_c2': "#FFF3CD", 'cal_c3': "#FFFFFF",
     'subj_colors': {
@@ -104,10 +128,11 @@ if "date" in st.query_params:
             st.session_state['last_processed_date'] = clicked_date_str
         except: pass
 
-# 데이터 정리
+# 데이터 정리 (원본 인덱스 유지를 위해 필터링 전에 날짜형 변환)
 if not df.empty and '날짜' in df.columns:
     df['날짜'] = pd.to_datetime(df['날짜'].astype(str).str.strip(), errors='coerce')
-    df = df.dropna(subset=['날짜']).copy()
+    # copy()는 기존 인덱스를 유지함 (sheet_row 매칭에 필수)
+    df = df.dropna(subset=['날짜']).copy() 
     df['날짜_date'] = df['날짜'].dt.date
     
     days_map = {0:'월', 1:'화', 2:'수', 3:'목', 4:'금', 5:'토', 6:'일'}
@@ -135,9 +160,7 @@ with st.sidebar:
         
         if submit:
             if time > 0:
-                new_row = pd.DataFrame([{"날짜": pd.to_datetime(date_input), "과목": subject, "시간": time, "사유": ""}])
-                updated_df = pd.concat([df, new_row], ignore_index=True)
-                update_data(updated_df)
+                append_data({"날짜": date_input, "과목": subject, "시간": time, "사유": ""})
                 st.success("기록 완료!")
                 st.rerun()
             else:
@@ -146,7 +169,6 @@ with st.sidebar:
     st.divider()
     st.header("🗑️ 최근 기록 삭제")
     if not df.empty:
-        # 삭제 목록에서 '설정' 행은 숨김
         del_df = df[df['과목'] != '설정']
         reversed_idx = list(reversed(del_df.index))
         def format_delete_item(x):
@@ -158,8 +180,7 @@ with st.sidebar:
             
         delete_idx = st.selectbox("빠른 삭제할 기록을 선택하세요 (최신순)", reversed_idx, format_func=format_delete_item)
         if st.button("선택한 기록 삭제", type="primary"):
-            updated_df = df.drop(delete_idx).reset_index(drop=True)
-            update_data(updated_df)
+            delete_data(delete_idx)
             st.warning("기록이 삭제되었습니다.")
             st.rerun()
 
@@ -171,13 +192,9 @@ else:
     study_df = df[(df['과목'] != '인정결석') & (df['과목'] != '메모') & (df['과목'] != '설정')]
     absence_df = df[df['과목'] == '인정결석']
 
-    # 휴식기 로직을 위한 세트 구성
-    # A. 공식 활동일 (공부 + 인정결석)
     active_dates_A = set(df[((df['시간'] > 0) | (df['과목'] == '인정결석')) & (df['과목'] != '설정')]['날짜_date'])
-    # B. 절대 활동일 (순수 공부만)
     active_dates_B = set(df[(df['시간'] > 0) & (df['과목'] != '설정') & (df['과목'] != '인정결석') & (df['과목'] != '메모')]['날짜_date'])
     
-    # 휴식기 계산 함수
     def calc_longest_break(active_set):
         if not active_set: return 0, None, None
         first_d = sorted(list(active_set))[0]
@@ -199,7 +216,6 @@ else:
     max_break_A, start_A, end_A = calc_longest_break(active_dates_A)
     max_break_B, start_B, end_B = calc_longest_break(active_dates_B)
 
-    # 스트릭 및 총 쉰 날 계산 (A 기준)
     streak_count = 0
     total_rest_days = 0
     total_rest_days_B = 0
@@ -278,7 +294,6 @@ else:
             col_chart1, col_chart2 = st.columns(2)
             with col_chart1:
                 sub_sum = filtered_df.groupby('과목', as_index=False)['시간'].sum()
-                # 설정된 과목 색상 적용
                 fig_donut = px.pie(sub_sum, values='시간', names='과목', title=f"🎯 {filter_opt} 과목별 학습 밸런스", hole=0.4, color='과목', color_discrete_map=st.session_state['subj_colors'])
                 st.plotly_chart(fig_donut, use_container_width=True)
 
@@ -297,7 +312,6 @@ else:
         with col_title:
             st.subheader("요일별 학습 패턴 및 인사이트")
         with col_check:
-            # 신규: 제외 버튼 그룹 (빨간 날 & 토요일)
             exclude_red_days = st.checkbox("🎈 빨간 날(공휴일/일요일) 제외", value=False)
             exclude_saturdays = st.checkbox("🌊 토요일 제외", value=False)
             
@@ -306,16 +320,14 @@ else:
         target_study_df = study_df.copy()
         target_dates_desc = active_dates_desc.copy()
         
-        cal_year = today.year # 대략적 당해 기준
+        cal_year = today.year
         kr_holidays = holidays.KR(years=range(cal_year-2, cal_year+2)) if HAS_HOLIDAYS else {}
 
-        # 날짜 제외 판별 함수
         def is_excluded(d):
             if exclude_red_days and (d.weekday() == 6 or (HAS_HOLIDAYS and d in kr_holidays)): return True
             if exclude_saturdays and d.weekday() == 5: return True
             return False
 
-        # 제외 로직 통합 적용
         if exclude_red_days or exclude_saturdays:
             target_study_df = target_study_df[~target_study_df['날짜_date'].apply(is_excluded)]
         
@@ -330,7 +342,6 @@ else:
                 full_dates = pd.date_range(start=first_d, end=today)
                 full_df = pd.DataFrame({'날짜_date': full_dates.date})
                 
-                # 제외 처리 시 분모(full_df)에서도 빼주어야 함
                 if exclude_red_days or exclude_saturdays:
                     full_df = full_df[~full_df['날짜_date'].apply(is_excluded)]
                 
@@ -347,7 +358,6 @@ else:
                 week_avg = pd.DataFrame({'요일': ['월', '화', '수', '목', '금', '토', '일'], '시간': [0]*7})
         
         with col_left:
-            # 무지개색 매핑 적용
             fig_week = px.bar(week_avg, x='요일', y='시간', color='요일', title="요일별 평균 공부 시간", color_discrete_map=rainbow_colors)
             st.plotly_chart(fig_week, use_container_width=True)
             
@@ -360,7 +370,6 @@ else:
             
             st.divider()
             
-            # 신규: 제외된 요일은 라디오 버튼 선택지에서도 제거
             day_options = ['월', '화', '수', '목', '금', '토', '일']
             if exclude_saturdays: day_options.remove('토')
             if exclude_red_days: day_options.remove('일')
@@ -486,7 +495,6 @@ else:
                         
                     holiday_html = f"<div class='cal-holiday'>{holiday_name_text}</div>" if is_holiday else ""
 
-                    # 클릭 시 불필요한 URL 파라미터를 최소화하여 넘김 (설정은 DB에서 부름)
                     href = f"?date={d}"
                     html += f"<a href='{href}' target='_self' style='text-decoration: none; color: inherit;'>"
                     html += f"<div class='cal-cell' style='background-color: {bg_color}; opacity: {opacity}; {stripe_css}'>"
@@ -509,7 +517,6 @@ else:
             st.info(f"{selected_date}에 기록된 공부 데이터가 없습니다.")
         else:
             st.write(f"**{selected_date} 기록 목록**")
-            # 설정 과목 숨기기
             disp_df = target_df[target_df['과목'] != '설정']
             st.dataframe(disp_df[['과목', '시간', '사유']], use_container_width=True)
             
@@ -535,19 +542,19 @@ else:
                 
                 with col_btn1:
                     if st.button("⏳ 수정 저장", use_container_width=True):
-                        updated_df = df.copy()
-                        if is_selected_abs or is_selected_memo: updated_df.loc[target_idx, '사유'] = new_reason
+                        row_dict = df.loc[target_idx].to_dict()
+                        if is_selected_abs or is_selected_memo: 
+                            row_dict['사유'] = new_reason
                         else:
-                            if new_time > 0: updated_df.loc[target_idx, '시간'] = new_time
+                            if new_time > 0: row_dict['시간'] = new_time
                             else: st.warning("0보다 큰 시간을 입력하세요."); st.stop()
-                        update_data(updated_df)
+                        edit_data(target_idx, row_dict)
                         st.success("성공적으로 수정되었습니다.")
                         st.rerun()
                 
                 with col_btn2:
                     if st.button("🗑️ 이 기록 완전히 삭제", use_container_width=True, type="primary"):
-                        updated_df = df.drop(target_idx).reset_index(drop=True)
-                        update_data(updated_df)
+                        delete_data(target_idx)
                         st.warning("기록이 삭제되었습니다.")
                         st.rerun()
 
@@ -562,9 +569,7 @@ else:
                 if submit_memo:
                     if memo_reason.strip() == "": st.warning("메모 내용을 입력해주세요.")
                     else:
-                        new_memo_row = pd.DataFrame([{"날짜": pd.to_datetime(selected_date), "과목": "메모", "시간": 0.0, "사유": memo_reason}])
-                        updated_df = pd.concat([df, new_memo_row], ignore_index=True)
-                        update_data(updated_df)
+                        append_data({"날짜": selected_date, "과목": "메모", "시간": 0.0, "사유": memo_reason})
                         st.success("메모가 달력에 등록되었습니다.")
                         st.rerun()
 
@@ -576,9 +581,7 @@ else:
                 if submit_abs:
                     if absence_reason.strip() == "": st.warning("사유를 반드시 입력해주세요.")
                     else:
-                        new_abs_row = pd.DataFrame([{"날짜": pd.to_datetime(selected_date), "과목": "인정결석", "시간": 0.0, "사유": absence_reason}])
-                        updated_df = pd.concat([df, new_abs_row], ignore_index=True)
-                        update_data(updated_df)
+                        append_data({"날짜": selected_date, "과목": "인정결석", "시간": 0.0, "사유": absence_reason})
                         st.success(f"{selected_date}이(가) 인정결석으로 처리되었습니다.")
                         st.rerun()
 
@@ -609,24 +612,24 @@ else:
             submit_settings = st.form_submit_button("설정 저장하기", type="primary")
             
             if submit_settings:
-                # 새로운 설정 딕셔너리 생성
                 save_dict = {
                     'cal_goal': n_hours, 'cal_c1': color1, 'cal_c2': color2, 'cal_c3': color3,
                     'subj_colors': new_colors
                 }
                 settings_json = json.dumps(save_dict)
                 
-                # 기존 설정 행 지우고 새 설정 행 추가
-                updated_df = df[df['과목'] != '설정'].copy()
-                new_setting_row = pd.DataFrame([{"날짜": today.strftime('%Y-%m-%d'), "과목": "설정", "시간": 0.0, "사유": settings_json}])
-                updated_df = pd.concat([updated_df, new_setting_row], ignore_index=True)
+                # 기존 설정 행 삭제 (아래에서부터 지워야 인덱스 밀림 방지)
+                setting_indices = df[df['과목'] == '설정'].index.tolist()
+                for idx in reversed(setting_indices):
+                    delete_data(idx)
                 
-                update_data(updated_df)
+                # 새 설정 추가
+                append_data({"날짜": today, "과목": "설정", "시간": 0.0, "사유": settings_json})
+                
                 st.success("설정이 데이터베이스에 안전하게 저장되었습니다!")
                 st.rerun()
 
     with st.expander("📄 전체 데이터 테이블 확인"):
         display_df = df.drop(columns=['날짜_date', '요일'], errors='ignore')
-        # 설정 관련 내부 데이터는 표에서 가림
         display_df = display_df[display_df['과목'] != '설정']
         st.write(display_df.sort_values('날짜', ascending=False))
