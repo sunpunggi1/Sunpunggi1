@@ -141,7 +141,10 @@ with st.sidebar:
 if df.empty:
     st.info("데이터가 없습니다. 왼쪽 사이드바에서 첫 공부 기록을 시작해보세요!")
 else:
-    df['날짜'] = pd.to_datetime(df['날짜'])
+    # 구글 시트 자동 서식 오염으로 인한 변환 에러(ValueError) 방지 및 쓰레기값 제거
+    df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
+    df = df.dropna(subset=['날짜']).copy()
+
     days_map = {0:'월', 1:'화', 2:'수', 3:'목', 4:'금', 5:'토', 6:'일'}
     df['요일'] = df['날짜'].dt.dayofweek.map(days_map)
     day_order = ['월', '화', '수', '목', '금', '토', '일']
