@@ -187,6 +187,19 @@ with st.sidebar:
             else:
                 st.warning("0시간 이상 입력해주세요.")
 
+    # --- 신규 반영: 마음상태 결산 위치 변경 및 범위 확장(1~9) ---
+    st.divider()
+    st.header("🧠 마음상태 결산")
+    with st.form("mind_form", clear_on_submit=True):
+        st.caption("1(불안함/공부부족) ↔ 5(평온) ↔ 9(답답함/과부하)")
+        mind_date = st.date_input("기록 날짜", value=st.session_state['selected_date'])
+        mind_val = st.slider("오늘의 마음 상태 지수", 1, 9, 5)
+        submit_mind = st.form_submit_button("상태 기록하기")
+        if submit_mind:
+            append_data({"날짜": mind_date, "과목": "마음상태", "시간": 0.0, "사유": str(mind_val)})
+            st.success("마음상태가 안전하게 기록되었습니다.")
+            st.rerun()
+
     st.divider()
     st.header("🗑️ 최근 기록 삭제")
     if not df.empty:
@@ -457,8 +470,7 @@ else:
                     
                     memo_data = target_df[target_df['과목'] == '메모']
                     memo_text = ", ".join(memo_data['사유'].tolist()) if not memo_data.empty else ""
-
-                    # 마음상태 데이터 추출
+                    
                     mind_data = target_df[target_df['과목'] == '마음상태']
                     mind_score = mind_data.iloc[-1]['사유'] if not mind_data.empty else ""
                     
@@ -466,7 +478,7 @@ else:
                     daily_stats[d] = {'hours': total_h, 'is_absence': is_absence, 'reason': reason, 'memo': memo_text, 'mind_score': mind_score}
 
         html = "<style>"
-        html += ".cal-container { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 20px; }"
+        html += ".cal-container { display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: 1fr; gap: 8px; margin-bottom: 20px; }"
         html += ".cal-header { text-align: center; font-weight: bold; color: #555; padding: 5px 0; }"
         
         html += ".cal-cell { height: 110px; min-height: 0; padding: 6px; border-radius: 8px; border: 1px solid #ddd; display: flex; flex-direction: column; justify-content: space-between; color: #333; box-shadow: 1px 1px 3px rgba(0,0,0,0.05); transition: all 0.2s ease; overflow: hidden; }"
@@ -476,22 +488,23 @@ else:
         html += ".cal-bottom { display: flex; flex-direction: column; align-items: flex-end; width: 100%; overflow: hidden; min-width: 0; }"
         
         html += ".cal-day-num { font-weight: bold; font-size: 1.1em; margin-bottom: 2px; }"
-        html += ".cal-holiday { font-size: 0.7em; color: #dc3545; font-weight: bold; display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }"
-        html += ".cal-memo { font-size: 0.75em; color: #495057; background: rgba(255,255,255,0.6); padding: 1px 4px; border-radius: 4px; border: 1px solid #dee2e6; display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; box-sizing: border-box; }"
-        html += ".cal-hours { font-size: 0.95em; font-weight: bold; white-space: nowrap; display: block; }"
-        html += ".cal-reason { font-size: 0.8em; color: #dc3545; font-weight: bold; line-height: 1.2; text-align: right; display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }"
-        html += ".cal-reason-text { display: none; }" 
+        html += ".cal-holiday { font-size: 0.7em; color: #dc3545; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; display: block; }"
+        html += ".cal-memo { font-size: 0.75em; color: #495057; background: rgba(255,255,255,0.6); padding: 1px 4px; border-radius: 4px; border: 1px solid #dee2e6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; align-self: flex-start; margin-bottom: 2px; display: block; box-sizing: border-box; }"
+        html += ".cal-hours { font-size: 0.95em; font-weight: bold; white-space: nowrap; }"
+        html += ".cal-reason { font-size: 0.8em; color: #dc3545; font-weight: bold; line-height: 1.2; text-align: right; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }"
+        html += ".cal-reason-text { font-weight: normal; color: #555; font-size: 0.9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }"
         html += ".cal-empty { background-color: transparent; border: none; box-shadow: none; }"
         
         html += "@media (max-width: 768px) {"
-        html += ".cal-container { gap: 2px; }" 
-        html += ".cal-header { font-size: 0.7em; padding: 2px 0; }" 
-        html += ".cal-cell { height: 80px; min-height: 80px; aspect-ratio: unset; padding: 3px; overflow: hidden; }" 
-        html += ".cal-day-num { font-size: 0.75em; margin-bottom: 0; }"
-        html += ".cal-hours { font-size: 0.7em; margin-top: auto; }"
-        html += ".cal-holiday { font-size: 0.55em; display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }"
-        html += ".cal-memo { font-size: 0.55em; padding: 1px 2px; margin-bottom: 1px; display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box; }"
-        html += ".cal-reason { font-size: 0.6em; text-align: right; display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }"
+        html += ".cal-container { gap: 4px; grid-auto-rows: 1fr; }"
+        html += ".cal-header { font-size: 0.75em; padding: 2px 0; }" 
+        html += ".cal-cell { height: auto; min-height: 70px; aspect-ratio: 1 / 1.15; padding: 4px; overflow: hidden; }" 
+        html += ".cal-day-num { font-size: 0.85em; margin-bottom: 1px; }"
+        html += ".cal-hours { font-size: 0.75em; }"
+        html += ".cal-holiday { font-size: 0.55em; }"
+        html += ".cal-memo { font-size: 0.55em; padding: 1px; margin-bottom: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; display: block; box-sizing: border-box; }"
+        html += ".cal-reason { font-size: 0.65em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; display: block; }"
+        html += ".cal-reason-text { display: none; }" 
         html += "}"
         html += "</style><div class='cal-container'>"
         
@@ -518,8 +531,12 @@ else:
                     memo = stats['memo']
                     mind_score = stats['mind_score']
 
-                    # 마음상태 점수에 따른 이모지 매핑
-                    mind_emoji = {"1": "😰", "2": "🙁", "3": "😌", "4": "😩", "5": "🤯"}.get(str(mind_score), "🧠")
+                    # 업데이트된 마음상태 이모지 매핑 (1~9)
+                    mind_emoji_map = {
+                        "1": "😭", "2": "😰", "3": "🙁", "4": "😐", "5": "😌", 
+                        "6": "😅", "7": "😩", "8": "😵‍💫", "9": "🤯"
+                    }
+                    mind_emoji = mind_emoji_map.get(str(mind_score), "🧠")
                     mind_html = f"<div class='cal-memo' style='background: #fff3cd; color: #856404;'>{mind_emoji} 상태: {mind_score}</div>" if mind_score else ""
 
                     stripe_css = ""
@@ -619,8 +636,7 @@ else:
                         st.rerun()
 
         st.write("---")
-        # 폼을 3열로 나누어 마음상태 입력칸 추가
-        col_form1, col_form2, col_form3 = st.columns(3)
+        col_form1, col_form2 = st.columns(2)
         
         with col_form1:
             st.write(f"**📌 {selected_date} 메모 등록**")
@@ -645,17 +661,6 @@ else:
                         append_data({"날짜": selected_date, "과목": "인정결석", "시간": 0.0, "사유": absence_reason})
                         st.success(f"{selected_date}이(가) 인정결석으로 처리되었습니다.")
                         st.rerun()
-
-        with col_form3:
-            st.write(f"**📌 {selected_date} 마음상태 결산**")
-            with st.form("mind_form", clear_on_submit=True):
-                st.caption("1(불안함/공부부족) ~ 5(답답함/과부하)")
-                mind_val = st.slider("오늘의 마음 상태 지수", 1, 5, 3)
-                submit_mind = st.form_submit_button("상태 기록하기")
-                if submit_mind:
-                    append_data({"날짜": selected_date, "과목": "마음상태", "시간": 0.0, "사유": str(mind_val)})
-                    st.success("마음상태가 안전하게 기록되었습니다.")
-                    st.rerun()
 
     elif selected_tab == "⚙️ 설정":
         st.subheader("⚙️ 대시보드 및 캘린더 설정")
