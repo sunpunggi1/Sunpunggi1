@@ -9,12 +9,14 @@ import calendar
 st.set_page_config(page_title="최현규의 열공 대시보드", layout="wide")
 st.title("🚀 최현규의 데이터 기반 학습 시스템")
 
-# --- 신규: 달력 클릭(URL 파라미터) 연동 및 설정 보존 로직 ---
+# --- 신규: 탭 상태 및 달력 파라미터 보존 로직 ---
 today = pd.Timestamp.now().date()
 if 'selected_date' not in st.session_state:
     st.session_state['selected_date'] = today
 
-# 캘린더 설정 상태 보존용 세션 초기화
+if 'cal_view_date' not in st.session_state:
+    st.session_state['cal_view_date'] = pd.to_datetime(today).replace(day=1).date()
+
 if 'cal_goal' not in st.session_state:
     st.session_state['cal_goal'] = 5.0
 if 'cal_c1' not in st.session_state:
@@ -24,23 +26,28 @@ if 'cal_c2' not in st.session_state:
 if 'cal_c3' not in st.session_state:
     st.session_state['cal_c3'] = "#F8D7DA"
 
-# 달력 칸을 클릭해서 URL에 파라미터가 추가되면 이를 감지하여 날짜 및 설정 복구
+# 탭 메뉴 초기화
+if 'active_tab' not in st.session_state:
+    st.session_state['active_tab'] = "📊 요약 및 추이"
+
+# 달력 클릭 시 URL 파라미터 감지 및 상태 강제 업데이트 (1회만 실행되도록 캐싱)
 if "date" in st.query_params:
-    try:
-        st.session_state['selected_date'] = pd.to_datetime(st.query_params["date"]).date()
-    except:
-        pass
-if "goal" in st.query_params:
-    try:
-        st.session_state['cal_goal'] = float(st.query_params["goal"])
-    except:
-        pass
-if "c1" in st.query_params and len(st.query_params["c1"]) == 6:
-    st.session_state['cal_c1'] = f"#{st.query_params['c1']}"
-if "c2" in st.query_params and len(st.query_params["c2"]) == 6:
-    st.session_state['cal_c2'] = f"#{st.query_params['c2']}"
-if "c3" in st.query_params and len(st.query_params["c3"]) == 6:
-    st.session_state['cal_c3'] = f"#{st.query_params['c3']}"
+    clicked_date_str = st.query_params["date"]
+    if st.session_state.get('last_processed_date') != clicked_date_str:
+        try:
+            clicked_date = pd.to_datetime(clicked_date_str).date()
+            st.session_state['selected_date'] = clicked_date
+            st.session_state['cal_view_date'] = pd.to_datetime(clicked_date).replace(day=1).date()
+            st.session_state['active_tab'] = "🗓️ 학습 캘린더 및 관리"  # 캘린더 탭으로 고정
+            
+            if "goal" in st.query_params: st.session_state['cal_goal'] = float(st.query_params["goal"])
+            if "c1" in st.query_params: st.session_state['cal_c1'] = f"#{st.query_params['c1']}"
+            if "c2" in st.query_params: st.session_state['cal_c2'] = f"#{st.query_params['c2']}"
+            if "c3" in st.query_params: st.session_state['cal_c3'] = f"#{st.query_params['c3']}"
+            
+            st.session_state['last_processed_date'] = clicked_date_str
+        except:
+            pass
 
 # 2. 구글 시트 직접 연결
 @st.cache_resource
@@ -57,7 +64,6 @@ except Exception as e:
     st.error(f"구글 시트 연결에 실패했습니다. Secrets 설정을 확인해주세요. 상세오류: {e}")
     st.stop()
 
-# 데이터 불러오기 함수
 def get_data():
     try:
         records = ws.get_all_records()
@@ -76,7 +82,6 @@ def get_data():
     except Exception:
         return pd.DataFrame(columns=['날짜', '과목', '시간', '사유'])
 
-# 데이터 업데이트 함수 
 def update_data(updated_df):
     try:
         ws.clear()
@@ -141,10 +146,10 @@ with st.sidebar:
 if df.empty:
     st.info("데이터가 없습니다. 왼쪽 사이드바에서 첫 공부 기록을 시작해보세요!")
 else:
-    # 구글 시트 자동 서식 오염으로 인한 변환 에러(ValueError) 방지 및 쓰레기값 제거
+    # 데이터 전처리 및 오염 방지
     df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
     df = df.dropna(subset=['날짜']).copy()
-
+    
     days_map = {0:'월', 1:'화', 2:'수', 3:'목', 4:'금', 5:'토', 6:'일'}
     df['요일'] = df['날짜'].dt.dayofweek.map(days_map)
     day_order = ['월', '화', '수', '목', '금', '토', '일']
@@ -189,9 +194,14 @@ else:
     this_week_df = study_df[study_df['날짜'] >= start_of_week]
     this_week_hours = this_week_df['시간'].sum()
 
-    tab1, tab2, tab3 = st.tabs(["📊 요약 및 추이", "📅 요일별 집중 분석", "🗓️ 학습 캘린더 및 관리"])
+    # --- 탭을 라디오 버튼 메뉴로 교체 (상태 유지용) ---
+    tabs = ["📊 요약 및 추이", "📅 요일별 집중 분석", "🗓️ 학습 캘린더 및 관리"]
+    
+    # st.radio를 가로로 배치하여 탭처럼 보이게 만듦
+    selected_tab = st.radio("메뉴 이동", tabs, horizontal=True, label_visibility="collapsed", key="active_tab")
+    st.write("---")
 
-    with tab1:
+    if selected_tab == "📊 요약 및 추이":
         st.subheader("📊 기간별 학습 요약 및 달성도")
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("총 공부 시간", f"{study_df['시간'].sum():.1f}h")
@@ -246,7 +256,7 @@ else:
             fig_daily = px.bar(daily_sum, x='날짜', y='시간', title=f"📅 {filter_opt} 일자별 공부 시간", text_auto=True)
             st.plotly_chart(fig_daily, use_container_width=True)
 
-    with tab2:
+    elif selected_tab == "📅 요일별 집중 분석":
         st.subheader("요일별 학습 패턴 및 인사이트")
         avg_method = st.radio("📊 평균 계산 기준", ["공부한 날만 포함", "쉬었던 날 포함(인정결석 제외)", "쉬었던 날(0시간) 포함"], horizontal=True)
         
@@ -292,11 +302,10 @@ else:
             else:
                 st.write(f"{sel_day}요일에 학습한 데이터가 아직 없습니다.")
 
-    with tab3:
+    elif selected_tab == "🗓️ 학습 캘린더 및 관리":
         st.subheader("🗓️ 학습 캘린더 및 상세 관리")
         
         with st.expander("🎨 캘린더 색상 및 목표 기준 설정"):
-            # 세션에 저장된 설정값을 불러오고, 수정 시 세션에 즉각 동기화
             n_hours = st.number_input("목표 달성 기준 시간 (n시간)", min_value=0.1, value=st.session_state['cal_goal'], step=0.5)
             st.session_state['cal_goal'] = n_hours
             
@@ -311,9 +320,23 @@ else:
                 color3 = st.color_picker("공부 안 한 날 (0h)", st.session_state['cal_c3'])
                 st.session_state['cal_c3'] = color3
 
-        col_y, col_m = st.columns(2)
-        cal_year = col_y.selectbox("연도", range(2023, 2031), index=st.session_state['selected_date'].year - 2023)
-        cal_month = col_m.selectbox("월", range(1, 13), index=st.session_state['selected_date'].month - 1)
+        # --- 화살표 기반 월 이동 컨트롤 ---
+        curr_view_dt = pd.to_datetime(st.session_state['cal_view_date'])
+        
+        col_btn_l, col_text, col_btn_r = st.columns([1, 4, 1])
+        with col_btn_l:
+            if st.button("◀ 이전 달", use_container_width=True):
+                st.session_state['cal_view_date'] = (curr_view_dt - pd.DateOffset(months=1)).date()
+                st.rerun()
+        with col_text:
+            st.markdown(f"<h3 style='text-align: center; margin-top: 0;'>{st.session_state['cal_view_date'].year}년 {st.session_state['cal_view_date'].month}월</h3>", unsafe_allow_html=True)
+        with col_btn_r:
+            if st.button("다음 달 ▶", use_container_width=True):
+                st.session_state['cal_view_date'] = (curr_view_dt + pd.DateOffset(months=1)).date()
+                st.rerun()
+
+        cal_year = st.session_state['cal_view_date'].year
+        cal_month = st.session_state['cal_view_date'].month
 
         cal = calendar.Calendar(firstweekday=0)
         month_days = cal.monthdatescalendar(cal_year, cal_month)
@@ -336,7 +359,7 @@ else:
         html += ".cal-cell:hover { transform: translateY(-3px); box-shadow: 2px 4px 8px rgba(0,0,0,0.15); border-color: #999; cursor: pointer; }"
         html += ".cal-day-num { font-weight: bold; font-size: 1.1em; margin-bottom: 5px; }"
         html += ".cal-hours { font-size: 0.95em; align-self: flex-end; font-weight: bold; }"
-        html += ".cal-reason { font-size: 0.85em; color: #555; font-style: italic; line-height: 1.2; margin-top: 5px; }"
+        html += ".cal-reason { font-size: 0.85em; color: #555; font-weight: bold; line-height: 1.2; margin-top: 5px; }"
         html += ".cal-empty { background-color: transparent; border: none; box-shadow: none; }"
         html += "</style><div class='cal-container'>"
         
@@ -345,7 +368,6 @@ else:
 
         first_d = sorted(list(active_dates))[0] if active_dates else today
         
-        # URL 쿼리에 실어보낼 설정값들 포매팅 (샵 기호 제거)
         q_goal = st.session_state['cal_goal']
         q_c1 = st.session_state['cal_c1'].replace('#', '')
         q_c2 = st.session_state['cal_c2'].replace('#', '')
@@ -361,14 +383,17 @@ else:
                     is_abs = stats['is_absence']
                     reason = stats['reason']
 
+                    stripe_css = ""
                     if d > today or d < first_d:
                         bg_color = "#FFFFFF"
                         opacity = "0.6"
                         text = ""
                     elif is_abs:
-                        bg_color = "#E9ECEF"
-                        opacity = "0.5"
-                        text = f"<span class='cal-reason'>🚫 인정결석<br>{reason}</span>"
+                        # 인정결석 시각화 보강: 회색조 및 빗금(스트라이프) 패턴 삽입
+                        bg_color = "#f8f9fa"
+                        opacity = "0.8"
+                        stripe_css = "background-image: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.05) 10px, rgba(0,0,0,0.05) 20px);"
+                        text = f"<span class='cal-reason'>🚫 인정결석<br><span style='font-weight: normal;'>{reason}</span></span>"
                     else:
                         opacity = "1"
                         if h >= n_hours:
@@ -379,10 +404,9 @@ else:
                             bg_color = color3
                         text = f"<span class='cal-hours'>{h:.1f} h</span>"
 
-                    # 클릭 시 현재 색상/시간 설정을 URL에 포함하여 전송
                     href = f"?date={d}&goal={q_goal}&c1={q_c1}&c2={q_c2}&c3={q_c3}"
                     html += f"<a href='{href}' target='_self' style='text-decoration: none; color: inherit;'>"
-                    html += f"<div class='cal-cell' style='background-color: {bg_color}; opacity: {opacity};'>"
+                    html += f"<div class='cal-cell' style='background-color: {bg_color}; opacity: {opacity}; {stripe_css}'>"
                     html += f"<span class='cal-day-num'>{d.day}</span>{text}"
                     html += "</div></a>"
                     
