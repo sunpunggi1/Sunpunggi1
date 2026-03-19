@@ -191,7 +191,7 @@ with st.sidebar:
     st.divider()
     st.header("🧠 마음상태 결산")
     with st.form("mind_form", clear_on_submit=True):
-        st.caption("1(불안함/공부부족) ↔ 5(평온) ↔ 9(답답함/과부하)")
+        st.caption("1(불안함) ↔ 9(과부하)")
         mind_date = st.date_input("기록 날짜", value=st.session_state['selected_date'])
         mind_val = st.slider("오늘의 마음 상태 지수", 1, 9, 5)
         submit_mind = st.form_submit_button("상태 기록하기")
