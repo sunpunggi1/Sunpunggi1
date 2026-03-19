@@ -63,7 +63,6 @@ if df.empty or '날짜' not in df.columns:
 
 # 3. 사이드바: 데이터 입력 및 관리
 with st.sidebar:
-    # --- 신규: 주간 목표 설정 ---
     st.header("🎯 주간 목표 설정")
     weekly_goal = st.number_input("이번 주 목표 공부 시간 (h)", min_value=1.0, value=40.0, step=1.0)
     st.divider()
@@ -88,7 +87,9 @@ with st.sidebar:
     st.divider()
     st.header("🗑️ 최근 기록 삭제")
     if not df.empty:
-        delete_idx = st.selectbox("빠른 삭제할 기록을 선택하세요", df.index, format_func=lambda x: f"[{x}] {df.iloc[x]['날짜']} - {df.iloc[x]['과목']} ({df.iloc[x]['시간']}h)")
+        # 인덱스를 역순으로 뒤집어 최신 기록이 상단에 오도록 수정
+        reversed_idx = list(reversed(df.index))
+        delete_idx = st.selectbox("빠른 삭제할 기록을 선택하세요 (최신순)", reversed_idx, format_func=lambda x: f"[{x}] {df.loc[x]['날짜']} - {df.loc[x]['과목']} ({df.loc[x]['시간']}h)")
         if st.button("선택한 기록 삭제", type="primary"):
             updated_df = df.drop(delete_idx).reset_index(drop=True)
             update_data(updated_df)
@@ -106,22 +107,41 @@ else:
     day_order = ['월', '화', '수', '목', '금', '토', '일']
     df['요일'] = pd.Categorical(df['요일'], categories=day_order, ordered=True)
 
-    # --- 신규: 연속 학습일(Streak) 계산 ---
-    unique_dates = sorted(df['날짜'].dt.date.unique(), reverse=True)
-    streak_count = 0
+    # 연속 학습일(Streak) 및 쉰 날(Rest days) 계산
+    unique_dates_asc = sorted(df['날짜'].dt.date.unique())
     today = pd.Timestamp.now().date()
     
-    if unique_dates:
-        # 오늘이나 어제 기록이 있다면 스트릭 활성화
-        if unique_dates[0] == today or unique_dates[0] == today - pd.Timedelta(days=1):
+    streak_count = 0
+    total_rest_days = 0
+    max_break = 0
+
+    if unique_dates_asc:
+        # 스트릭 계산 (최근 날짜부터 역순 확인)
+        unique_dates_desc = list(reversed(unique_dates_asc))
+        if unique_dates_desc[0] == today or unique_dates_desc[0] == today - pd.Timedelta(days=1):
             streak_count = 1
-            curr_d = unique_dates[0]
-            for d in unique_dates[1:]:
+            curr_d = unique_dates_desc[0]
+            for d in unique_dates_desc[1:]:
                 if d == curr_d - pd.Timedelta(days=1):
                     streak_count += 1
                     curr_d = d
                 else:
                     break
+        
+        # 총 쉰 날 및 최장 휴식일 계산 (첫 기록일 ~ 오늘 기준)
+        first_date = unique_dates_asc[0]
+        full_date_range = pd.date_range(start=first_date, end=today).date
+        study_dates_set = set(unique_dates_asc)
+        
+        # 기록이 없는 날짜 집계
+        total_rest_days = len([d for d in full_date_range if d not in study_dates_set])
+        
+        # 일수 차이를 통한 최장 공백기(휴식일) 산출
+        diffs = [(unique_dates_asc[i] - unique_dates_asc[i-1]).days - 1 for i in range(1, len(unique_dates_asc))]
+        gap_to_today = (today - unique_dates_asc[-1]).days
+        
+        all_gaps = diffs + [gap_to_today]
+        max_break = max(all_gaps) if all_gaps else 0
 
     # 이번 주 데이터 필터링 (월요일 기점)
     now_ts = pd.Timestamp.now().normalize()
@@ -135,16 +155,16 @@ else:
     with tab1:
         st.subheader("📊 기간별 학습 요약 및 달성도")
         
-        # 상단 지표 (스트릭 추가)
-        c1, c2, c3, c4 = st.columns(4)
+        # 상단 지표 (쉰 날, 최장 휴식 지표 추가)
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("총 공부 시간", f"{df['시간'].sum():.1f}h")
-        c2.metric("🔥 연속 학습일", f"{streak_count}일째!")
+        c2.metric("🔥 연속 학습", f"{streak_count}일")
         c3.metric("기록 일수", f"{df['날짜'].nunique()}일")
-        c4.metric("전체 일평균", f"{(df['시간'].sum()/df['날짜'].nunique() if df['날짜'].nunique() > 0 else 0):.1f}h")
+        c4.metric("총 쉰 날", f"{total_rest_days}일")
+        c5.metric("최장 휴식일", f"{max_break}일")
         
         st.divider()
 
-        # --- 신규: 주간 목표 달성 프로그레스 바 ---
         st.write(f"**이번 주 목표 달성률 ({this_week_hours:.1f}h / {weekly_goal:.1f}h)**")
         progress_pct = min(this_week_hours / weekly_goal, 1.0)
         st.progress(progress_pct)
@@ -155,7 +175,6 @@ else:
         
         st.divider()
 
-        # --- 신규: 주간 리포트 자동 생성 ---
         if not this_week_df.empty:
             top_subject = this_week_df.groupby('과목')['시간'].sum().idxmax()
             top_day = this_week_df.groupby('요일', observed=True)['시간'].sum().idxmax()
@@ -163,7 +182,6 @@ else:
         
         st.divider()
         
-        # 주간/월간 필터 추가
         filter_opt = st.radio("조회 기간 선택", ["전체 기간", "최근 7일 (주간)", "최근 30일 (월간)"], horizontal=True)
         filtered_df = df.copy()
         
@@ -175,9 +193,7 @@ else:
         if filtered_df.empty:
             st.warning("선택한 기간에 기록된 학습 데이터가 없습니다.")
         else:
-            # 과목 밸런스(도넛 차트) & 누적 시간(영역 그래프)
             col_chart1, col_chart2 = st.columns(2)
-            
             with col_chart1:
                 sub_sum = filtered_df.groupby('과목', as_index=False)['시간'].sum()
                 fig_donut = px.pie(sub_sum, values='시간', names='과목', title=f"🎯 {filter_opt} 과목별 학습 밸런스", hole=0.4)
@@ -195,16 +211,36 @@ else:
 
     with tab2:
         st.subheader("요일별 학습 패턴 및 인사이트")
+        
+        # 계산 방식 선택 필터 추가
+        avg_method = st.radio("📊 평균 계산 기준", ["공부한 날만 포함", "쉬었던 날(0시간) 포함"], horizontal=True)
+        
         col_left, col_right = st.columns(2)
         
-        week_avg = df.groupby('요일', observed=True)['시간'].mean().reset_index()
+        # 날짜별 합계를 먼저 구한 뒤 요일별 평균 산출
+        daily_sum_df = df.groupby(['날짜', '요일'], observed=True)['시간'].sum().reset_index()
+        
+        if avg_method == "공부한 날만 포함":
+            week_avg = daily_sum_df[daily_sum_df['시간'] > 0].groupby('요일', observed=True)['시간'].mean().reset_index()
+        else:
+            if unique_dates_asc:
+                # 첫 기록부터 오늘까지 전체 캘린더 생성
+                full_dates = pd.date_range(start=unique_dates_asc[0], end=today)
+                full_df = pd.DataFrame({'날짜': full_dates})
+                full_df['요일'] = full_df['날짜'].dt.dayofweek.map(days_map)
+                full_df['요일'] = pd.Categorical(full_df['요일'], categories=day_order, ordered=True)
+                
+                # 기록이 없는 날은 시간을 0으로 채움
+                merged_df = pd.merge(full_df, daily_sum_df[['날짜', '시간']], on='날짜', how='left').fillna({'시간': 0})
+                week_avg = merged_df.groupby('요일', observed=True)['시간'].mean().reset_index()
+            else:
+                week_avg = pd.DataFrame({'요일': day_order, '시간': [0]*7})
         
         with col_left:
             fig_week = px.bar(week_avg, x='요일', y='시간', color='요일', title="요일별 평균 공부 시간")
             st.plotly_chart(fig_week, use_container_width=True)
             
         with col_right:
-            # --- 신규: 요일별 슬럼프/집중도 인사이트 ---
             if not week_avg.empty and week_avg['시간'].sum() > 0:
                 max_day = week_avg.loc[week_avg['시간'].idxmax(), '요일']
                 min_day = week_avg.loc[week_avg['시간'].idxmin(), '요일']
@@ -234,9 +270,11 @@ else:
             st.divider()
             st.subheader("데이터 수정 및 삭제")
             
+            # 인덱스 역순 적용 (최신 기록 위로)
+            target_idx_list = list(reversed(target_df.index))
             target_idx = st.selectbox(
-                "수정 또는 삭제할 과목 기록을 선택하세요", 
-                target_df.index, 
+                "수정 또는 삭제할 과목 기록을 선택하세요 (최신순)", 
+                target_idx_list, 
                 format_func=lambda x: f"{df.loc[x, '과목']} ({df.loc[x, '시간']}h)"
             )
             
