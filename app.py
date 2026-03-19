@@ -337,7 +337,7 @@ else:
             exclude_red_days = st.checkbox("🎈 빨간 날(공휴일/일요일) 제외", value=False)
             exclude_saturdays = st.checkbox("🌊 토요일 제외", value=False)
             
-        avg_method = st.radio("📊 평균 계산 기준", ["공부한 날만 포함", "쉬었던 날 포함(인정결석 제외)", "쉬었던 날 포함(인정결석 포함)"], horizontal=True)
+        avg_method = st.radio("📊 평균 계산 기준", ["공부한 날만 포함", "쉬었던 날 포함(인정결석 제외)", "전체 날짜 포함 (모든 휴일/결석/기록 없는 날 포함)"], horizontal=True)
         
         target_study_df = study_df.copy()
         target_dates_desc = active_dates_desc.copy()
@@ -465,6 +465,8 @@ else:
         html = "<style>"
         html += ".cal-container { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 20px; }"
         html += ".cal-header { text-align: center; font-weight: bold; color: #555; padding: 5px 0; }"
+        
+        # 기본 PC 화면에서의 캘린더 셀 CSS
         html += ".cal-cell { height: 110px; padding: 6px; border-radius: 8px; border: 1px solid #ddd; display: flex; flex-direction: column; justify-content: space-between; color: #333; box-shadow: 1px 1px 3px rgba(0,0,0,0.05); transition: all 0.2s ease; overflow: hidden; }"
         html += ".cal-cell:hover { transform: translateY(-3px); box-shadow: 2px 4px 8px rgba(0,0,0,0.15); border-color: #999; cursor: pointer; }"
         html += ".cal-top { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.1; }"
@@ -476,6 +478,18 @@ else:
         html += ".cal-reason { font-size: 0.8em; color: #dc3545; font-weight: bold; line-height: 1.2; text-align: right; width: 100%; }"
         html += ".cal-reason-text { font-weight: normal; color: #555; font-size: 0.9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }"
         html += ".cal-empty { background-color: transparent; border: none; box-shadow: none; }"
+        
+        # 모바일 화면을 위한 미디어 쿼리 추가 (화면 너비 768px 이하일 때 적용)
+        html += "@media (max-width: 768px) {"
+        html += ".cal-container { gap: 4px; }"
+        html += ".cal-cell { height: auto; aspect-ratio: 1 / 1.15; padding: 4px; }"
+        html += ".cal-day-num { font-size: 0.85em; margin-bottom: 1px; }"
+        html += ".cal-hours { font-size: 0.75em; }"
+        html += ".cal-holiday { font-size: 0.6em; }"
+        html += ".cal-memo { font-size: 0.6em; padding: 1px; margin-bottom: 1px; }"
+        html += ".cal-reason { font-size: 0.7em; }"
+        html += ".cal-reason-text { display: none; }" # 모바일에서는 사유 텍스트 숨김 처리하여 공간 확보
+        html += "}"
         html += "</style><div class='cal-container'>"
         
         for day_name in ["일", "월", "화", "수", "목", "금", "토"]:
